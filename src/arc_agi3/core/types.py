@@ -49,6 +49,7 @@ class Transition:
     changed: bool
     reward_delta: float = 0.0
     terminal: bool = False
+    won: bool = False
 
 
 @dataclass(slots=True)
@@ -69,6 +70,16 @@ class RuleHypothesis:
     summary: str
     confidence: float
     evidence: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class LLMDecisionTrace:
+    step_idx: int
+    state_key: str
+    prompt: str
+    raw_response: str
+    ranked_actions: list[RankedAction] = field(default_factory=list)
+    hypotheses: list[RuleHypothesis] = field(default_factory=list)
 
 
 DEFAULT_ACTIONS: tuple[Action, ...] = tuple(

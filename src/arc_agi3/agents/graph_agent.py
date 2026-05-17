@@ -28,12 +28,13 @@ class GraphSearchAgent(ArcAgentRuntime):
                 changed=next_observation.changed,
                 reward_delta=result.reward_delta,
                 terminal=result.done,
+                won=result.won,
             )
             self.graph.record(transition)
             self._learn_from_transition(transition)
 
             if result.done:
-                return True, step_idx + 1
+                return result.won, step_idx + 1
 
             observation = next_observation
             self.recent_states.append(observation.state_key)
@@ -91,3 +92,5 @@ class GraphSearchAgent(ArcAgentRuntime):
                 transition.action.key,
                 "noop",
             )
+        if transition.terminal and not transition.won:
+            self.game_memory.remember_danger(transition.action.key)

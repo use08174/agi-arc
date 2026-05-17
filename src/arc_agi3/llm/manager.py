@@ -3,7 +3,13 @@ from __future__ import annotations
 import hashlib
 
 from arc_agi3.core.config import LLMConfig
-from arc_agi3.core.types import Action, Observation, RankedAction, RuleHypothesis
+from arc_agi3.core.types import (
+    Action,
+    LLMDecisionTrace,
+    Observation,
+    RankedAction,
+    RuleHypothesis,
+)
 from arc_agi3.llm.noop import NoOpLLMProvider
 from arc_agi3.llm.prompting import PromptBuilder
 from arc_agi3.llm.provider import LLMProvider
@@ -27,6 +33,7 @@ class LLMHookManager:
         self._cache: dict[str, list[RankedAction]] = {}
         self._last_call_step = -10**9
         self._call_count = 0
+        self._traces: list[LLMDecisionTrace] = []
 
     @property
     def enabled(self) -> bool:
@@ -61,6 +68,18 @@ class LLMHookManager:
         if step_idx - self._last_call_step < self.config.step_interval:
             return []
         bundle = self.provider.analyze(context)
+        if self.config.trace_enabled:
+            prompt = self.prompt_builder.build(context)
+            self._traces.append(
+                LLMDecisionTrace(
+                    step_idx=step_idx,
+                    state_key=observation.state_key,
+                    prompt=prompt,
+                    raw_response=bundle.raw_response,
+                    ranked_actions=bundle.ranked_actions,
+                    hypotheses=bundle.hypotheses,
+                )
+            )
         self._last_call_step = step_idx
         self._call_count += 1
         if bundle.hypotheses:
@@ -91,9 +110,13 @@ class LLMHookManager:
         self._cache = {}
         self._last_call_step = -10**9
         self._call_count = 0
+        self._traces = []
 
     def close(self) -> None:
         self.provider.close()
+
+    def recent_traces(self) -> list[LLMDecisionTrace]:
+        return list(self._traces)
 
     def _build_context(
         self,

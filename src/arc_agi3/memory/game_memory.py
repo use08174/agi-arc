@@ -13,6 +13,7 @@ class GameMemory:
     promising_actions: set[str] = field(default_factory=set)
     solved_level_paths: list[list[str]] = field(default_factory=list)
     changed_action_keys: set[str] = field(default_factory=set)
+    dangerous_action_keys: set[str] = field(default_factory=set)
     hypotheses: list[RuleHypothesis] = field(default_factory=list)
 
     def remember_effect(self, action_name: str, action_key: str, effect: str) -> None:
@@ -20,3 +21,6 @@ class GameMemory:
         if effect != "noop":
             self.promising_actions.add(action_name)
             self.changed_action_keys.add(action_key)
+
+    def remember_danger(self, action_key: str) -> None:
+        self.dangerous_action_keys.add(action_key)

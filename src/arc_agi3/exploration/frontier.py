@@ -21,11 +21,15 @@ class FrontierExplorer:
         recent_states: set[str],
     ) -> Action | None:
         for action in actions:
+            if action.key in game_memory.dangerous_action_keys:
+                continue
             if graph.seen_successor(observation.state_key, action) is None:
                 return action
 
         ranked = []
         for action in actions:
+            if action.key in game_memory.dangerous_action_keys:
+                continue
             if graph.action_is_probably_useless(observation.state_key, action):
                 continue
             successor = graph.seen_successor(observation.state_key, action)
@@ -33,6 +37,7 @@ class FrontierExplorer:
                 return action
             ranked.append(
                 (
+                    action.key in game_memory.dangerous_action_keys,
                     action.name not in game_memory.promising_actions,
                     successor in recent_states,
                     graph.is_back_edge(observation.state_key, successor),
@@ -42,8 +47,8 @@ class FrontierExplorer:
                 )
             )
         if ranked:
-            ranked.sort(key=lambda item: (item[0], item[1], item[2], item[3], item[4], item[5].key))
-            return ranked[0][5]
+            ranked.sort(key=lambda item: (item[0], item[1], item[2], item[3], item[4], item[5], item[6].key))
+            return ranked[0][6]
 
         return None
 

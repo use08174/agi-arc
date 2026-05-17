@@ -11,6 +11,7 @@ class StateNode:
     state_key: str
     visits: int = 0
     terminal: bool = False
+    winning_terminal: bool = False
     outgoing: dict[str, str] = field(default_factory=dict)
 
 
@@ -30,6 +31,8 @@ class StateGraph:
     def record(self, transition: Transition) -> None:
         self.touch(transition.from_state)
         self.touch(transition.to_state, terminal=transition.terminal)
+        if transition.won:
+            self.nodes[transition.to_state].winning_terminal = True
         node = self.nodes[transition.from_state]
         node.outgoing[transition.action.key] = transition.to_state
         self.transitions.append(transition)

@@ -41,6 +41,10 @@ class LLMConfig:
     step_interval: int = 8
     max_calls_per_episode: int = 12
     cache_enabled: bool = True
+    trace_enabled: bool = True
+    trace_print_prompt: bool = False
+    trace_print_raw_response: bool = True
+    trace_print_limit: int = 6
 
 
 @dataclass(slots=True)

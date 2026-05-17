@@ -23,11 +23,13 @@ class SimplePlanner:
     ) -> list[PlanStep]:
         terminal_candidates = []
         for action in actions:
+            if action.key in game_memory.dangerous_action_keys:
+                continue
             successor = graph.seen_successor(observation.state_key, action)
             if successor is None:
                 continue
             node = graph.nodes.get(successor)
-            if node is not None and node.terminal:
+            if node is not None and node.winning_terminal:
                 terminal_candidates.append(action)
         if terminal_candidates:
             return [
@@ -41,11 +43,15 @@ class SimplePlanner:
         for action in actions:
             if action.name not in game_memory.promising_actions:
                 continue
+            if action.key in game_memory.dangerous_action_keys:
+                continue
             if graph.action_is_probably_useless(observation.state_key, action):
                 continue
             successor = graph.seen_successor(observation.state_key, action)
+            node = graph.nodes.get(successor) if successor is not None else None
             ranked.append(
                 (
+                    successor is not None and node is not None and node.terminal and not node.winning_terminal,
                     successor is not None and successor == observation.state_key,
                     successor in recent_states if successor is not None else False,
                     graph.is_back_edge(observation.state_key, successor)
@@ -61,11 +67,11 @@ class SimplePlanner:
             )
         if ranked:
             ranked.sort(
-                key=lambda item: (item[0], item[1], item[2], item[3], item[4], item[5], item[6].key)
+                key=lambda item: (item[0], item[1], item[2], item[3], item[4], item[5], item[6], item[7].key)
             )
             return [
                 PlanStep(
-                    action=ranked[0][6],
+                    action=ranked[0][7],
                     reason="following the least-looping promising transition",
                 )
             ]

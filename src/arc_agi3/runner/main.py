@@ -44,6 +44,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-step-interval", type=int, default=8)
     parser.add_argument("--llm-max-calls", type=int, default=12)
     parser.add_argument("--llm-max-new-tokens", type=int, default=192)
+    parser.add_argument("--llm-show-trace", action="store_true")
+    parser.add_argument("--llm-show-prompt", action="store_true")
     return parser.parse_args()
 
 
@@ -65,6 +67,8 @@ def main() -> None:
         step_interval=args.llm_step_interval,
         max_calls_per_episode=args.llm_max_calls,
         max_new_tokens=args.llm_max_new_tokens,
+        trace_enabled=args.llm_show_trace,
+        trace_print_prompt=args.llm_show_prompt,
     )
 
     runtime = RuntimeConfig(
@@ -94,6 +98,29 @@ def main() -> None:
         print("known_states=", len(agent.graph.nodes))
         print(f"llm_enabled={llm_config.enabled}")
         print(f"llm_provider={llm_config.provider}")
+        if args.llm_show_trace and llm_config.enabled:
+            for trace in agent.llm.recent_traces()[-llm_config.trace_print_limit :]:
+                print(f"llm_trace_step={trace.step_idx} state={trace.state_key}")
+                if llm_config.trace_print_prompt:
+                    print("llm_prompt<<<")
+                    print(trace.prompt)
+                    print(">>>")
+                if llm_config.trace_print_raw_response:
+                    print("llm_raw_response<<<")
+                    print(trace.raw_response.strip())
+                    print(">>>")
+                if trace.ranked_actions:
+                    rendered = [
+                        f"{item.action.key} score={item.score:.2f} reason={item.reason}"
+                        for item in trace.ranked_actions
+                    ]
+                    print("llm_ranked_actions=", rendered)
+                if trace.hypotheses:
+                    rendered = [
+                        f"{item.summary} conf={item.confidence:.2f}"
+                        for item in trace.hypotheses
+                    ]
+                    print("llm_hypotheses=", rendered)
     finally:
         try:
             if 'agent' in locals():

@@ -38,7 +38,12 @@ class MockArcEnvironment:
         changed = before != after
         done = after == (2, 2)
         frame = self._frame(status=GameStatus.WIN if done else GameStatus.IN_PROGRESS)
-        return StepResult(frame=frame, reward_delta=1.0 if done else 0.0, done=done)
+        return StepResult(
+            frame=frame,
+            reward_delta=1.0 if done else 0.0,
+            done=done,
+            won=done,
+        )
 
     def _frame(self, status: GameStatus = GameStatus.IN_PROGRESS) -> Frame:
         rows = []

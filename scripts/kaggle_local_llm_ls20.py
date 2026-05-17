@@ -53,6 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-max-calls", type=int, default=12)
     parser.add_argument("--llm-max-new-tokens", type=int, default=192)
     parser.add_argument("--llm-device", default="auto")
+    parser.add_argument("--llm-show-trace", action="store_true")
+    parser.add_argument("--llm-show-prompt", action="store_true")
     return parser.parse_args()
 
 
@@ -90,6 +92,10 @@ def main() -> None:
         "--llm-max-new-tokens",
         str(args.llm_max_new_tokens),
     ]
+    if args.llm_show_trace:
+        sys.argv.append("--llm-show-trace")
+    if args.llm_show_prompt:
+        sys.argv.append("--llm-show-prompt")
     runner_main()
 
 

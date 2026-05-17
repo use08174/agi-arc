@@ -11,11 +11,18 @@ class PromptBuilder:
     """
 
     def build(self, context: LLMContext) -> str:
+        status = (
+            context.observation.frame.status.value
+            if context.observation.frame is not None
+            else "UNKNOWN"
+        )
         lines = [
             "You are helping an ARC-AGI-3 agent.",
             "Do not choose arbitrary actions. Prefer actions that test a concrete rule.",
+            "Do not rush to an apparent goal if the environment may require a setup action first.",
+            "Prefer prerequisite-changing actions when a direct goal action has already failed or led to dead ends.",
             f"State key: {context.observation.state_key}",
-            f"Status: {context.observation.frame.status.value}",
+            f"Status: {status}",
             f"Known promising actions: {', '.join(context.known_promising_actions) or 'none'}",
             f"Recent states: {', '.join(context.recent_states[-8:]) or 'none'}",
             "Candidate actions:",

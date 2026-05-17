@@ -11,6 +11,7 @@ class StepResult:
     frame: Frame
     reward_delta: float
     done: bool
+    won: bool = False
 
 
 class ArcEnvironment(Protocol):

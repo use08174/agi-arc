@@ -92,8 +92,14 @@ class ArcadeEnvironment:
             self._last_frame.info.get("levels_completed", 0) if self._last_frame else 0
         )
         done = next_frame.status in {GameStatus.WIN, GameStatus.GAME_OVER}
+        won = next_frame.status == GameStatus.WIN
         self._last_frame = next_frame
-        return StepResult(frame=next_frame, reward_delta=float(reward_delta), done=done)
+        return StepResult(
+            frame=next_frame,
+            reward_delta=float(reward_delta),
+            done=done,
+            won=won,
+        )
 
     def valid_actions(self) -> list[Action]:
         names = [action.name for action in self.wrapper.action_space]
