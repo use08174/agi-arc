@@ -1,33 +1,26 @@
 from __future__ import annotations
 
 from arc_agi3.agents.base import ArcAgentRuntime
-from arc_agi3.agents.env_understanding_agent import EnvUnderstandingAgent
 from arc_agi3.core.types import Action, Observation, Transition
 from arc_agi3.envs.base import ArcEnvironment
-from arc_agi3.planning.safety_shield import SafetyShield
 
 
 class GraphSearchAgent(ArcAgentRuntime):
-    """Explore-first agent scaffold with semantic world-model updates."""
+    """Explore-first agent scaffold for ARC-AGI-3 style tasks."""
 
     def run_episode(self, env: ArcEnvironment) -> tuple[bool, int]:
         self.reset_level()
-        self.safety_shield = SafetyShield()
-        self.understanding_agent = EnvUnderstandingAgent()
         frame = env.reset()
         observation = self.hasher.observe(frame)
-        self.game_memory.world_model.update_from_observation(observation.notes)
-        self.understanding_agent.inspect(env, observation, self.game_memory)
         self.graph.touch(observation.state_key, terminal=False)
         self.recent_states.append(observation.state_key)
+
         for step_idx in range(self.config.budget.max_steps_per_level):
             actions = env.valid_actions()
             action = self._choose_action(step_idx, observation, actions)
-            action = self.safety_shield.validate_or_replace(action, observation, actions, self.game_memory)
-            before_notes = dict(observation.notes)
             result = env.step(action)
             next_observation = self.hasher.observe(result.frame, previous=observation.frame)
-            self.game_memory.world_model.update_from_observation(next_observation.notes)
+
             transition = Transition(
                 from_state=observation.state_key,
                 action=action,
@@ -39,20 +32,22 @@ class GraphSearchAgent(ArcAgentRuntime):
                 notes=next_observation.notes,
             )
             self.graph.record(transition)
-            self.game_memory.world_model.learn_transition(
-                action=action,
-                before_notes=before_notes,
-                after_notes=next_observation.notes,
-                terminal_loss=result.done and not result.won,
-            )
             self._learn_from_transition(transition)
+
             if result.done:
                 return result.won, step_idx + 1
+
             observation = next_observation
             self.recent_states.append(observation.state_key)
+
         return False, self.config.budget.max_steps_per_level
 
-    def _choose_action(self, step_idx: int, observation: Observation, actions: list[Action]) -> Action:
+    def _choose_action(
+        self,
+        step_idx: int,
+        observation: Observation,
+        actions: list[Action],
+    ) -> Action:
         actions = self._filter_useless_actions(observation, actions)
         ranked_actions = self.llm.rank_actions(
             observation=observation,
@@ -70,6 +65,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             game_memory=self.game_memory,
             force_exploration=step_idx < self.config.budget.explore_phase_steps,
         )
+
         if step_idx >= self.config.budget.explore_phase_steps:
             plan = self.planner.build_plan(
                 observation=observation,
@@ -80,6 +76,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             )
             if plan:
                 return plan[0].action
+
         action = self.explorer.choose_action(
             observation=observation,
             actions=actions,
@@ -93,43 +90,88 @@ class GraphSearchAgent(ArcAgentRuntime):
 
     def _learn_from_transition(self, transition: Transition) -> None:
         notes = transition.notes
+
         likely_feedback_flash = bool(notes.get("likely_feedback_flash", False))
         changed_playfield_cells = int(notes.get("changed_playfield_cells", 0) or 0)
         changed_hud_cells = int(notes.get("changed_hud_cells", 0) or 0)
         collectible_progress = bool(notes.get("collectible_progress", False))
-        semantic_player_moved = bool(notes.get("semantic_player_moved", False))
-        hud_only_change = changed_hud_cells > 0 and changed_playfield_cells == 0 and transition.reward_delta <= 0 and not collectible_progress
-        meaningful_change = changed_playfield_cells > 0 or transition.reward_delta > 0 or collectible_progress or semantic_player_moved
+
+        hud_only_change = (
+            changed_hud_cells > 0
+            and changed_playfield_cells == 0
+            and transition.reward_delta <= 0
+            and not collectible_progress
+        )
+
+        meaningful_change = (
+            changed_playfield_cells > 0
+            or transition.reward_delta > 0
+            or collectible_progress
+        )
+
         if likely_feedback_flash or hud_only_change:
-            self.game_memory.remember_effect(transition.action.name, transition.action.key, "feedback_only")
+            self.game_memory.remember_effect(
+                transition.action.name,
+                transition.action.key,
+                "feedback_only",
+            )
             self.game_memory.remember_feedback(transition.action.key)
+
         elif meaningful_change:
-            self.game_memory.remember_effect(transition.action.name, transition.action.key, "changed_state")
+            self.game_memory.remember_effect(
+                transition.action.name,
+                transition.action.key,
+                "changed_state",
+            )
+
         else:
-            self.game_memory.remember_effect(transition.action.name, transition.action.key, "noop")
+            self.game_memory.remember_effect(
+                transition.action.name,
+                transition.action.key,
+                "noop",
+            )
+
         if transition.reward_delta != 0:
-            self.game_memory.remember_reward(transition.action.key, transition.reward_delta)
-        self.game_memory.remember_transition_signature(transition.action.name, transition.action.key, transition.notes)
+            self.game_memory.remember_reward(
+                transition.action.key,
+                transition.reward_delta,
+            )
+
+        self.game_memory.remember_transition_signature(
+            transition.action.name,
+            transition.action.key,
+            transition.notes,
+        )
+
         if collectible_progress:
             self.game_memory.remember_collectible_progress(transition.action.key)
-            self.game_memory.remember_effect(transition.action.name, transition.action.key, "collectible_progress")
+            self.game_memory.remember_effect(
+                transition.action.name,
+                transition.action.key,
+                "collectible_progress",
+            )
+
         if transition.terminal and not transition.won:
             self.game_memory.remember_danger(transition.action.key)
 
-    def _filter_useless_actions(self, observation: Observation, actions: list[Action]) -> list[Action]:
-        filtered = []
-        for action in actions:
-            if self.game_memory.world_model.is_unsafe_action(action):
-                continue
-            if self.graph.action_is_probably_useless(observation.state_key, action):
-                continue
-            filtered.append(action)
+    def _filter_useless_actions(
+        self,
+        observation: Observation,
+        actions: list[Action],
+    ) -> list[Action]:
+        filtered = [
+            action
+            for action in actions
+            if not self.graph.action_is_probably_useless(observation.state_key, action)
+        ]
         return filtered or actions
 
-    def _fallback_action(self, observation: Observation, actions: list[Action]) -> Action:
+    def _fallback_action(
+        self,
+        observation: Observation,
+        actions: list[Action],
+    ) -> Action:
         for action in actions:
-            if self.game_memory.world_model.is_unsafe_action(action):
-                continue
             if not self.graph.action_is_probably_useless(observation.state_key, action):
                 return action
         return actions[0]

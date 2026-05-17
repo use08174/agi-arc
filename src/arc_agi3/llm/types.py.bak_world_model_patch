@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from arc_agi3.core.types import Action, Observation, RankedAction, RuleHypothesis
 
@@ -16,13 +15,6 @@ class LLMContext:
     candidate_action_evidence: list[str] = field(default_factory=list)
     latest_transitions: list[str] = field(default_factory=list)
     prior_hypotheses: list[RuleHypothesis] = field(default_factory=list)
-    semantic_ascii_map: str = ""
-    world_model_summary: list[str] = field(default_factory=list)
-    recent_scene_events: list[str] = field(default_factory=list)
-    goal_hypotheses: list[str] = field(default_factory=list)
-    relation_candidates: list[str] = field(default_factory=list)
-    proposed_tests: list[str] = field(default_factory=list)
-    candidate_subgoals: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)

@@ -7,68 +7,67 @@ from arc_agi3.memory.state_graph import StateGraph
 
 
 class FrontierExplorer:
-    """Prioritize untried or informative actions before planning deeply."""
+    """Prioritize informative, safe frontier actions."""
 
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
 
-    # src/arc_agi3/exploration/frontier.py
-
     def choose_action(
         self,
-        observation,
-        actions,
-        graph,
-        game_memory,
-        recent_states,
-    ):
+        observation: Observation,
+        actions: list[Action],
+        graph: StateGraph,
+        game_memory: GameMemory,
+        recent_states: set[str],
+    ) -> Action | None:
+        world = game_memory.world_model
         ranked = []
-
-        for action in actions:
-            if action.key in game_memory.dangerous_action_keys:
+        for index, action in enumerate(actions):
+            if world.is_unsafe_action(action):
                 continue
-
             successor = graph.seen_successor(observation.state_key, action)
             profile = game_memory.semantic_profile(action.name, action.key)
-
             unseen_from_state = successor is None
-            known_changed = action.key in game_memory.changed_action_keys
+            known_changed = action.key in game_memory.changed_action_keys or action.key in game_memory.promising_action_keys
             known_reward = profile.reward_total > 0
             known_collectible = profile.collectible_progress > 0
-            globally_noop = profile.uses >= 2 and profile.changed_uses == 0
+            globally_noop = profile.uses >= 2 and profile.changed_uses == 0 and profile.reward_total <= 0
             terminal_loss = profile.terminal_losses > 0
-
             loops_recent = successor in recent_states if successor is not None else False
-            back_edge = (
-                graph.is_back_edge(observation.state_key, successor)
-                if successor is not None
-                else False
-            )
-
+            back_edge = graph.is_back_edge(observation.state_key, successor) if successor is not None else False
+            target = world.predicted_target(world.player_pos, action.name)
+            moves_toward_item = False
+            item_targets = world.visible_item_cells or world.known_item_cells
+            if target is not None and item_targets and world.player_pos is not None:
+                before = min(abs(world.player_pos[0] - ix) + abs(world.player_pos[1] - iy) for ix, iy in item_targets)
+                after = min(abs(target[0] - ix) + abs(target[1] - iy) for ix, iy in item_targets)
+                moves_toward_item = after < before
+            click_target_preferred = False
+            if action.name == "ACTION6" and action.payload:
+                xy = (int(action.payload.get("x", -999)), int(action.payload.get("y", -999)))
+                click_target_preferred = xy in world.preferred_click_targets(limit=12)
             ranked.append(
                 (
                     terminal_loss,
                     globally_noop and not unseen_from_state,
                     loops_recent,
                     back_edge,
+                    not click_target_preferred,
+                    not moves_toward_item,
                     not known_reward,
                     not known_collectible,
                     not known_changed,
                     not unseen_from_state,
-                    graph.traversals_for(observation.state_key, action, successor)
-                    if successor is not None
-                    else 0,
+                    graph.traversals_for(observation.state_key, action, successor) if successor is not None else 0,
                     graph.visits_for(successor) if successor is not None else 0,
                     profile.noop_uses,
-                    action.key,
+                    index,
                     action,
                 )
             )
-
         if ranked:
             ranked.sort(key=lambda item: item[:-1])
             return ranked[0][-1]
-
         return None
 
     def reorder_with_rankings(
@@ -82,27 +81,24 @@ class FrontierExplorer:
     ) -> list[Action]:
         if not ranked_actions:
             return actions
+        world = game_memory.world_model
+        score_by_key = {item.action.key: item.score for item in ranked_actions}
+        index_by_key = {item.action.key: idx for idx, item in enumerate(ranked_actions)}
 
-        def bucket(action: Action) -> int:
-            unseen = graph.seen_successor(observation.state_key, action) is None
-            dangerous = action.key in game_memory.dangerous_action_keys
-            if dangerous:
-                return 3
+        def bucket(action: Action) -> tuple:
+            unsafe = world.is_unsafe_action(action)
+            successor = graph.seen_successor(observation.state_key, action)
+            unseen = successor is None
+            score = -score_by_key.get(action.key, 0.0)
+            rank_index = index_by_key.get(action.key, 10**6)
+            if unsafe:
+                return (9, rank_index, action.key)
+            if action.key in game_memory.promising_action_keys:
+                return (0, score, rank_index, action.key)
+            if unseen and force_exploration:
+                return (1, score, rank_index, action.key)
             if unseen:
-                return 0
-            if force_exploration:
-                return 2
-            return 1
+                return (2, score, rank_index, action.key)
+            return (3, score, rank_index, action.key)
 
-        ranked_keys = [item.action.key for item in ranked_actions]
-        by_key = {action.key: action for action in actions}
-        score_index = {key: idx for idx, key in enumerate(ranked_keys)}
-        ordered = sorted(
-            actions,
-            key=lambda action: (
-                bucket(action),
-                score_index.get(action.key, 10**6),
-                action.key,
-            ),
-        )
-        return ordered
+        return sorted(actions, key=bucket)

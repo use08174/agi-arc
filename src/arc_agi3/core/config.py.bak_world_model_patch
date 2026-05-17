@@ -4,14 +4,14 @@ from pathlib import Path
 
 @dataclass(slots=True)
 class ClickExpansionConfig:
-    grid_points_per_axis: int = 2
-    max_candidates: int = 6
+    grid_points_per_axis: int = 3
+    max_candidates: int = 9
 
 
 @dataclass(slots=True)
 class BudgetConfig:
     max_steps_per_level: int = 128
-    explore_phase_steps: int = 8
+    explore_phase_steps: int = 24
     revisit_limit: int = 3
     recent_state_window: int = 12
 
@@ -34,12 +34,12 @@ class LLMConfig:
     dtype: str = "auto"
     max_ranked_actions: int = 3
     include_hypotheses: bool = True
-    max_new_tokens: int = 256
+    max_new_tokens: int = 192
     temperature: float = 0.0
     top_p: float = 1.0
-    start_step: int = 1
-    step_interval: int = 1
-    max_calls_per_episode: int = 80
+    start_step: int = 8
+    step_interval: int = 8
+    max_calls_per_episode: int = 12
     cache_enabled: bool = True
     trace_enabled: bool = True
     trace_print_prompt: bool = False
@@ -57,4 +57,3 @@ class RuntimeConfig:
     recordings_dir: Path = Path("recordings")
     save_recording: bool = False
     include_frame_data: bool = True
-
