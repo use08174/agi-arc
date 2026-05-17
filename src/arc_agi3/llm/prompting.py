@@ -57,6 +57,21 @@ class PromptBuilder:
                 lines.append(
                     f"- anchor={patch['anchor']} region={patch['region']} nonzero={patch['nonzero']} colors={patch['colors']} signature={patch['signature']}"
                 )
+        collectible_candidates = context.observation.notes.get("collectible_candidates", [])
+        if collectible_candidates:
+            lines.append("Collectible-like candidates:")
+            for item in collectible_candidates[:6]:
+                lines.append(
+                    f"- anchor={item['anchor']} area={item['area']} color={item['color']} bbox={item['bbox']} shape={item['shape_signature']}"
+                )
+        collectible_changes = context.observation.notes.get("collectible_changes", {})
+        if collectible_changes:
+            removed = collectible_changes.get("removed", [])
+            added = collectible_changes.get("added", [])
+            if removed or added:
+                lines.append(
+                    f"Collectible candidate changes: removed={removed[:4]} added={added[:4]}"
+                )
         region_changes = context.observation.notes.get("region_change_summary", [])
         if region_changes:
             lines.append("Recent region-structure changes:")
@@ -81,6 +96,9 @@ class PromptBuilder:
         )
         lines.append(
             "If corner or HUD patches have distinct signatures, consider whether one patch is a target and another is a mutable state that should be aligned."
+        )
+        lines.append(
+            "If collectible-like candidates exist, prioritize exploring routes that reach them before committing to the finish."
         )
         lines.append(
             "Return a ranked short list of actions and optional rule hypotheses."

@@ -51,10 +51,12 @@ class SimplePlanner:
             node = graph.nodes.get(successor) if successor is not None else None
             profile = game_memory.semantic_profile(action.name, action.key)
             hints = set(profile.interaction_hints)
+            collectible_candidates_exist = int(observation.notes.get("collectible_candidate_count", 0) or 0) > 0
             ranked.append(
                 (
                     successor is not None and node is not None and node.terminal and not node.winning_terminal,
                     "hud_or_counter_update" in hints and profile.reward_total <= 0,
+                    collectible_candidates_exist and profile.collectible_progress <= 0 and "pickup_or_consume" not in hints,
                     "pickup_or_consume" not in hints and "spawn_or_unlock" not in hints,
                     successor is not None and successor == observation.state_key,
                     successor in recent_states if successor is not None else False,
@@ -71,11 +73,11 @@ class SimplePlanner:
             )
         if ranked:
             ranked.sort(
-                key=lambda item: (item[0], item[1], item[2], item[3], item[4], item[5], item[6], item[7], item[8], item[9].key)
+                key=lambda item: (item[0], item[1], item[2], item[3], item[4], item[5], item[6], item[7], item[8], item[9], item[10].key)
             )
             return [
                 PlanStep(
-                    action=ranked[0][9],
+                    action=ranked[0][10],
                     reason="following the least-looping promising transition",
                 )
             ]

@@ -92,6 +92,7 @@ class ActionSemanticProfile:
     noop_uses: int = 0
     reward_total: float = 0.0
     feedback_flashes: int = 0
+    collectible_progress: int = 0
     terminal_losses: int = 0
     terminal_wins: int = 0
     avg_changed_cells: float = 0.0

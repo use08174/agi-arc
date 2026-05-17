@@ -118,6 +118,13 @@ class GraphSearchAgent(ArcAgentRuntime):
             transition.action.key,
             transition.notes,
         )
+        if bool(transition.notes.get("collectible_progress", False)):
+            self.game_memory.remember_collectible_progress(transition.action.key)
+            self.game_memory.remember_effect(
+                transition.action.name,
+                transition.action.key,
+                "collectible_progress",
+            )
         if transition.terminal and not transition.won:
             self.game_memory.remember_danger(transition.action.key)
         if likely_feedback_flash and transition.reward_delta <= 0:

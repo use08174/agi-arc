@@ -63,8 +63,8 @@ class ActionSemanticsTest(unittest.TestCase):
             grid=(
                 (1, 1, 0, 0, 0, 0, 2, 2),
                 (1, 0, 0, 0, 0, 0, 2, 0),
-                (0, 0, 0, 0, 0, 0, 0, 0),
-                (0, 0, 0, 0, 0, 0, 0, 0),
+                (0, 0, 0, 5, 5, 0, 0, 0),
+                (0, 0, 0, 0, 5, 0, 0, 0),
                 (3, 3, 0, 0, 0, 0, 4, 4),
                 (3, 0, 0, 0, 0, 0, 4, 0),
             ),
@@ -81,6 +81,7 @@ class ActionSemanticsTest(unittest.TestCase):
         patches = observation.notes["anchor_patch_summary"]
         self.assertTrue(any(item["anchor"] == "bottom_left" for item in patches))
         self.assertTrue(any(item["anchor"] == "bottom_right" for item in patches))
+        self.assertTrue(observation.notes["collectible_candidates"])
 
     def test_small_anchor_patch_flash_is_marked_as_feedback(self) -> None:
         hasher = StateHasher()

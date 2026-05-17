@@ -29,6 +29,7 @@ class GameMemory:
     action_region_biases: dict[str, Counter[str]] = field(default_factory=dict)
     action_interaction_hints: dict[str, Counter[str]] = field(default_factory=dict)
     action_feedback_counts: dict[str, int] = field(default_factory=dict)
+    action_collectible_progress_counts: dict[str, int] = field(default_factory=dict)
 
     def remember_effect(self, action_name: str, action_key: str, effect: str) -> None:
         self.action_semantics[action_name] = effect
@@ -58,6 +59,11 @@ class GameMemory:
     def remember_feedback(self, action_key: str) -> None:
         self.action_feedback_counts[action_key] = (
             self.action_feedback_counts.get(action_key, 0) + 1
+        )
+
+    def remember_collectible_progress(self, action_key: str) -> None:
+        self.action_collectible_progress_counts[action_key] = (
+            self.action_collectible_progress_counts.get(action_key, 0) + 1
         )
 
     def dedupe_hypotheses(self, keep_last: int = 8) -> None:
@@ -120,6 +126,7 @@ class GameMemory:
             noop_uses=noop_uses,
             reward_total=self.action_reward_counts.get(action_key, 0.0),
             feedback_flashes=self.action_feedback_counts.get(action_key, 0),
+            collectible_progress=self.action_collectible_progress_counts.get(action_key, 0),
             terminal_losses=self.action_terminal_loss_counts.get(action_key, 0),
             terminal_wins=0,
             avg_changed_cells=self.action_changed_cells_total.get(action_key, 0) / divisor,

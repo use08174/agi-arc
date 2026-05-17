@@ -78,12 +78,15 @@ class StateHasher:
             if region["anchor_name"] != "center"
         ]
         anchor_patch_summary = self._anchor_patch_summary(frame, hud_rows)
+        collectible_candidates = self._collectible_candidates(regions, frame)
         return {
             "salient_region_count": len(regions),
             "salient_regions": regions[:12],
             "repeated_motif_summary": repeated_summaries,
             "anchor_region_summary": anchor_summary[:4],
             "anchor_patch_summary": anchor_patch_summary,
+            "collectible_candidates": collectible_candidates[:8],
+            "collectible_candidate_count": len(collectible_candidates),
         }
 
     def _diff_notes(self, previous: Frame, current: Frame) -> dict[str, object]:
@@ -168,6 +171,7 @@ class StateHasher:
         )
         region_change_summary = self._region_change_summary(previous, current)
         anchor_patch_changes = self._anchor_patch_changes(previous, current)
+        collectible_changes = self._collectible_changes(previous, current)
         likely_feedback_flash = self._likely_feedback_flash(
             width=len(current.grid[0]) if current.grid else 0,
             height=len(current.grid),
@@ -191,6 +195,8 @@ class StateHasher:
             "moved_color_candidates": moved_color_candidates,
             "region_change_summary": region_change_summary,
             "anchor_patch_changes": anchor_patch_changes,
+            "collectible_changes": collectible_changes,
+            "collectible_progress": bool(collectible_changes["removed"]) and changed_playfield_cells <= 24,
             "likely_feedback_flash": likely_feedback_flash,
         }
 
@@ -298,6 +304,49 @@ class StateHasher:
                 }
             )
         return summaries
+
+    def _collectible_candidates(self, regions: list[dict[str, Any]], frame: Frame) -> list[dict[str, Any]]:
+        height = len(frame.grid)
+        width = len(frame.grid[0]) if height else 0
+        candidates: list[dict[str, Any]] = []
+        for region in regions:
+            if region["region"] != "playfield":
+                continue
+            area = int(region["area"])
+            bbox = region["bbox"]
+            if area < 3 or area > 12:
+                continue
+            if bbox["width"] > 6 or bbox["height"] > 6:
+                continue
+            if bbox["min_x"] <= 0 or bbox["min_y"] <= 0 or bbox["max_x"] >= width - 1 or bbox["max_y"] >= height - 1:
+                continue
+            if region["anchor_name"] in {"bottom_left", "bottom_right", "top_left", "top_right"}:
+                continue
+            candidates.append(
+                {
+                    "bbox": bbox,
+                    "area": area,
+                    "color": region["color"],
+                    "shape_signature": region["shape_signature"],
+                    "anchor": region["anchor_name"],
+                }
+            )
+        candidates.sort(key=lambda item: (item["bbox"]["min_y"], item["bbox"]["min_x"]))
+        return candidates
+
+    def _collectible_changes(self, previous: Frame, current: Frame) -> dict[str, list[str]]:
+        prev = {
+            item["shape_signature"] + f":{item['bbox']['min_x']}:{item['bbox']['min_y']}"
+            for item in self._collectible_candidates(self._extract_regions(previous, self._hud_rows(previous)), previous)
+        }
+        curr = {
+            item["shape_signature"] + f":{item['bbox']['min_x']}:{item['bbox']['min_y']}"
+            for item in self._collectible_candidates(self._extract_regions(current, self._hud_rows(current)), current)
+        }
+        return {
+            "removed": sorted(prev - curr),
+            "added": sorted(curr - prev),
+        }
 
     def _anchor_name(
         self,
