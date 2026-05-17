@@ -37,6 +37,8 @@ class SimplePlanner:
         for action in actions:
             if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
+            if action.name in game_memory.undo_like_action_names or action.key in game_memory.undo_like_action_keys:
+                continue
             if world.is_unsafe_action(action):
                 continue
             successor = graph.seen_successor(observation.state_key, action)
@@ -52,6 +54,8 @@ class SimplePlanner:
         for action in actions:
             if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
+            if action.name in game_memory.undo_like_action_names or action.key in game_memory.undo_like_action_keys:
+                continue
             profile = game_memory.semantic_profile(action.name, action.key)
             learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
             is_promising = (
@@ -62,7 +66,7 @@ class SimplePlanner:
             )
             if not is_promising:
                 continue
-            if learned_label in {"restart_like", "hud_only"} and learned_confidence >= 0.6:
+            if learned_label in {"restart_like", "undo_like", "hud_only"} and learned_confidence >= 0.6:
                 continue
             if world.is_unsafe_action(action):
                 continue

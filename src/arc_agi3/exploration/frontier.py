@@ -25,6 +25,8 @@ class FrontierExplorer:
         for index, action in enumerate(actions):
             if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
+            if action.name in game_memory.undo_like_action_names or action.key in game_memory.undo_like_action_keys:
+                continue
             if world.is_unsafe_action(action):
                 continue
             successor = graph.seen_successor(observation.state_key, action)
@@ -52,7 +54,7 @@ class FrontierExplorer:
             ranked.append(
                 (
                     terminal_loss,
-                    learned_label in {"restart_like", "hud_only"} and learned_confidence >= 0.6,
+                    learned_label in {"restart_like", "undo_like", "hud_only"} and learned_confidence >= 0.6,
                     globally_noop and not unseen_from_state,
                     loops_recent,
                     back_edge,
@@ -93,6 +95,7 @@ class FrontierExplorer:
         def bucket(action: Action) -> tuple:
             unsafe = world.is_unsafe_action(action)
             restart_like = action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys
+            undo_like = action.name in game_memory.undo_like_action_names or action.key in game_memory.undo_like_action_keys
             learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
             successor = graph.seen_successor(observation.state_key, action)
             unseen = successor is None
@@ -100,7 +103,9 @@ class FrontierExplorer:
             rank_index = index_by_key.get(action.key, 10**6)
             if restart_like:
                 return (10, rank_index, action.key)
-            if learned_label in {"restart_like", "hud_only"} and learned_confidence >= 0.6:
+            if undo_like:
+                return (9, rank_index, action.key)
+            if learned_label in {"restart_like", "undo_like", "hud_only"} and learned_confidence >= 0.6:
                 return (8, rank_index, action.key)
             if unsafe:
                 return (9, rank_index, action.key)

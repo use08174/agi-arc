@@ -133,6 +133,8 @@ class GraphSearchAgent(ArcAgentRuntime):
         for action in actions:
             if action.name in self.game_memory.restart_like_action_names or action.key in self.game_memory.restart_like_action_keys:
                 continue
+            if action.name in self.game_memory.undo_like_action_names or action.key in self.game_memory.undo_like_action_keys:
+                continue
             if self.game_memory.world_model.is_unsafe_action(action):
                 continue
             if self.graph.action_is_probably_useless(observation.state_key, action):

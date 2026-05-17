@@ -37,7 +37,7 @@ class RevertActionTest(unittest.TestCase):
         filtered = agent._filter_useless_actions(third, [Action(name="ACTION3"), Action(name="ACTION8")])
         self.assertEqual([action.name for action in filtered], ["ACTION3"])
 
-    def test_agent_marks_one_step_reversion_as_undo_like_without_filtering_it(self) -> None:
+    def test_agent_marks_one_step_reversion_as_undo_like_and_filters_it(self) -> None:
         agent = GraphSearchAgent()
         first = observation(agent, ((1, 0, 0),))
         second = observation(agent, ((0, 1, 0),), previous=first.frame)
@@ -61,7 +61,7 @@ class RevertActionTest(unittest.TestCase):
 
         self.assertIn("ACTION7", agent.game_memory.undo_like_action_names)
         filtered = agent._filter_useless_actions(third, [Action(name="ACTION3"), Action(name="ACTION7")])
-        self.assertEqual([action.name for action in filtered], ["ACTION3", "ACTION7"])
+        self.assertEqual([action.name for action in filtered], ["ACTION3"])
         agent._learn_action_semantics(
             Transition(
                 from_state=third.state_key,
