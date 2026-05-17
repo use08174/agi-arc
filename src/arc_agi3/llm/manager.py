@@ -130,7 +130,8 @@ class LLMHookManager:
             (
                 f"{transition.from_state} --{transition.action.key}--> "
                 f"{transition.to_state} changed={transition.changed} "
-                f"reward={transition.reward_delta}"
+                f"reward={transition.reward_delta} "
+                f"terminal={transition.terminal} won={transition.won}"
             )
             for transition in graph.transitions[-8:]
         ]
@@ -139,6 +140,7 @@ class LLMHookManager:
             candidate_actions=candidate_actions,
             recent_states=recent_states,
             known_promising_actions=sorted(game_memory.promising_actions),
+            known_dangerous_actions=sorted(game_memory.dangerous_action_keys),
             latest_transitions=latest_transitions,
             prior_hypotheses=game_memory.hypotheses,
         )

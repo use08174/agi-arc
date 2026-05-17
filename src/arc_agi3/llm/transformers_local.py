@@ -179,13 +179,51 @@ Rules:
         )
 
     def _extract_json_object(self, response_text: str) -> dict[str, Any] | None:
-        match = re.search(r"\{.*\}", response_text, re.DOTALL)
-        if not match:
+        fenced_match = re.search(
+            r"```(?:json)?\s*(\{.*?\})\s*```",
+            response_text,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if fenced_match:
+            parsed = self._try_json_loads(fenced_match.group(1))
+            if parsed is not None:
+                return parsed
+
+        stripped = response_text.strip()
+        parsed = self._try_json_loads(stripped)
+        if parsed is not None:
+            return parsed
+
+        candidates = re.findall(r"\{.*?\}", response_text, re.DOTALL)
+        for candidate in candidates:
+            parsed = self._try_json_loads(candidate)
+            if parsed is not None and "ranked_actions" in parsed:
+                return parsed
+
+        first = response_text.find("{")
+        if first == -1:
             return None
+        depth = 0
+        start = None
+        for idx, char in enumerate(response_text[first:], start=first):
+            if char == "{":
+                if depth == 0:
+                    start = idx
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0 and start is not None:
+                    parsed = self._try_json_loads(response_text[start : idx + 1])
+                    if parsed is not None:
+                        return parsed
+        return None
+
+    def _try_json_loads(self, raw: str) -> dict[str, Any] | None:
         try:
-            return json.loads(match.group(0))
+            parsed = json.loads(raw)
         except json.JSONDecodeError:
             return None
+        return parsed if isinstance(parsed, dict) else None
 
     def _fallback_parse(
         self,

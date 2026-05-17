@@ -6,6 +6,7 @@ from arc_agi3.agents.graph_agent import GraphSearchAgent
 from arc_agi3.core.config import AgentConfig, LLMConfig
 from arc_agi3.core.types import Action, Observation, RankedAction
 from arc_agi3.llm.provider import LLMProvider
+from arc_agi3.llm.transformers_local import TransformersLocalProvider
 from arc_agi3.llm.types import LLMContext, LLMDecisionBundle
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.memory.state_graph import StateGraph
@@ -42,6 +43,24 @@ class LLMRankingTest(unittest.TestCase):
         )
         reordered = agent.explorer.reorder_with_rankings(actions, ranked)
         self.assertEqual(reordered[0].name, "ACTION4")
+
+    def test_transformers_provider_parses_fenced_json(self) -> None:
+        provider = TransformersLocalProvider(LLMConfig(enabled=True))
+        actions = [Action(name="ACTION3"), Action(name="ACTION4")]
+        response = """```json
+{
+  "ranked_actions": [
+    {"action": "ACTION3", "score": 0.9, "reason": "test direct move"}
+  ],
+  "hypotheses": [
+    {"summary": "test hypothesis", "confidence": 0.6, "evidence": ["fact"]}
+  ]
+}
+```"""
+        bundle = provider._parse_response(response, actions)
+        self.assertEqual(len(bundle.ranked_actions), 1)
+        self.assertEqual(bundle.ranked_actions[0].action.name, "ACTION3")
+        self.assertEqual(bundle.ranked_actions[0].reason, "test direct move")
 
 
 if __name__ == "__main__":
