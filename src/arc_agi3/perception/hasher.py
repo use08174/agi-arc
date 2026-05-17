@@ -72,15 +72,18 @@ class StateHasher:
                 "bbox": region["bbox"],
                 "area": region["area"],
                 "region": region["region"],
+                "color": region["color"],
             }
             for region in anchor_regions
             if region["anchor_name"] != "center"
         ]
+        anchor_patch_summary = self._anchor_patch_summary(frame, hud_rows)
         return {
             "salient_region_count": len(regions),
             "salient_regions": regions[:12],
             "repeated_motif_summary": repeated_summaries,
             "anchor_region_summary": anchor_summary[:4],
+            "anchor_patch_summary": anchor_patch_summary,
         }
 
     def _diff_notes(self, previous: Frame, current: Frame) -> dict[str, object]:
@@ -164,6 +167,14 @@ class StateHasher:
             motion_axis=motion_axis,
         )
         region_change_summary = self._region_change_summary(previous, current)
+        anchor_patch_changes = self._anchor_patch_changes(previous, current)
+        likely_feedback_flash = self._likely_feedback_flash(
+            width=len(current.grid[0]) if current.grid else 0,
+            height=len(current.grid),
+            changed_playfield_cells=changed_playfield_cells,
+            changed_hud_cells=changed_hud_cells,
+            anchor_patch_changes=anchor_patch_changes,
+        )
 
         return {
             "changed_cells": changed_cells,
@@ -179,6 +190,8 @@ class StateHasher:
             "interaction_hint": interaction_hint,
             "moved_color_candidates": moved_color_candidates,
             "region_change_summary": region_change_summary,
+            "anchor_patch_changes": anchor_patch_changes,
+            "likely_feedback_flash": likely_feedback_flash,
         }
 
     def _extract_regions(self, frame: Frame, hud_rows: int) -> list[dict[str, Any]]:
@@ -190,7 +203,8 @@ class StateHasher:
         hud_start = max(0, height - hud_rows)
         for y in range(height):
             for x in range(width):
-                if (x, y) in seen or int(grid[y][x]) == 0:
+                color = int(grid[y][x])
+                if (x, y) in seen or color == 0:
                     continue
                 stack = [(x, y)]
                 seen.add((x, y))
@@ -199,7 +213,12 @@ class StateHasher:
                     cx, cy = stack.pop()
                     cells.append((cx, cy))
                     for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
-                        if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in seen and int(grid[ny][nx]) != 0:
+                        if (
+                            0 <= nx < width
+                            and 0 <= ny < height
+                            and (nx, ny) not in seen
+                            and int(grid[ny][nx]) == color
+                        ):
                             seen.add((nx, ny))
                             stack.append((nx, ny))
                 min_x = min(cell[0] for cell in cells)
@@ -212,7 +231,7 @@ class StateHasher:
                     for row in range(min_y, max_y + 1)
                 )
                 shape_grid = tuple(
-                    tuple(1 if int(grid[row][col]) != 0 else 0 for col in range(min_x, max_x + 1))
+                    tuple(1 if int(grid[row][col]) == color else 0 for col in range(min_x, max_x + 1))
                     for row in range(min_y, max_y + 1)
                 )
                 region = "hud" if min_y >= hud_start else "playfield"
@@ -236,6 +255,7 @@ class StateHasher:
                         },
                         "area": area,
                         "region": region,
+                        "color": color,
                         "anchor_name": anchor_name,
                         "anchor_rank": anchor_rank,
                         "signature": hashlib.sha1(repr(bbox_grid).encode("utf-8")).hexdigest()[:10],
@@ -244,6 +264,40 @@ class StateHasher:
                 )
         regions.sort(key=lambda item: (-int(item["area"]), item["bbox"]["min_y"], item["bbox"]["min_x"]))
         return regions
+
+    def _anchor_patch_summary(self, frame: Frame, hud_rows: int) -> list[dict[str, Any]]:
+        grid = frame.grid
+        height = len(grid)
+        width = len(grid[0]) if height else 0
+        if height == 0 or width == 0:
+            return []
+        patch_h = max(4, min(10, height // 6))
+        patch_w = max(4, min(10, width // 6))
+        anchors = [
+            ("top_left", 0, 0),
+            ("top_right", max(0, width - patch_w), 0),
+            ("bottom_left", 0, max(0, height - patch_h)),
+            ("bottom_right", max(0, width - patch_w), max(0, height - patch_h)),
+        ]
+        summaries: list[dict[str, Any]] = []
+        for name, start_x, start_y in anchors:
+            patch = tuple(
+                tuple(int(grid[y][x]) for x in range(start_x, min(width, start_x + patch_w)))
+                for y in range(start_y, min(height, start_y + patch_h))
+            )
+            nonzero = sum(1 for row in patch for value in row if value != 0)
+            colors = sorted({int(value) for row in patch for value in row if value != 0})
+            region = "hud" if start_y >= max(0, height - hud_rows) else "playfield"
+            summaries.append(
+                {
+                    "anchor": name,
+                    "region": region,
+                    "nonzero": nonzero,
+                    "colors": colors[:6],
+                    "signature": hashlib.sha1(repr(patch).encode("utf-8")).hexdigest()[:10],
+                }
+            )
+        return summaries
 
     def _anchor_name(
         self,
@@ -296,6 +350,42 @@ class StateHasher:
             if len(summary) >= 6:
                 break
         return summary
+
+    def _anchor_patch_changes(self, previous: Frame, current: Frame) -> list[str]:
+        prev_patches = {
+            item["anchor"]: item["signature"]
+            for item in self._anchor_patch_summary(previous, self._hud_rows(previous))
+        }
+        curr_patches = {
+            item["anchor"]: item["signature"]
+            for item in self._anchor_patch_summary(current, self._hud_rows(current))
+        }
+        changed: list[str] = []
+        for anchor, signature in curr_patches.items():
+            if prev_patches.get(anchor) != signature:
+                changed.append(anchor)
+        return changed
+
+    def _likely_feedback_flash(
+        self,
+        width: int,
+        height: int,
+        changed_playfield_cells: int,
+        changed_hud_cells: int,
+        anchor_patch_changes: list[str],
+    ) -> bool:
+        if width < 12 or height < 12:
+            return False
+        if not anchor_patch_changes:
+            return False
+        lower_panel_change = any("bottom" in anchor for anchor in anchor_patch_changes)
+        if not lower_panel_change and changed_hud_cells == 0:
+            return False
+        if changed_playfield_cells <= 8:
+            return True
+        if changed_hud_cells > 0 and changed_playfield_cells <= 16:
+            return True
+        return False
 
     def _hud_rows(self, frame: Frame) -> int:
         height = len(frame.grid)

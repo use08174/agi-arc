@@ -28,16 +28,17 @@ class GameMemory:
     action_change_kinds: dict[str, Counter[str]] = field(default_factory=dict)
     action_region_biases: dict[str, Counter[str]] = field(default_factory=dict)
     action_interaction_hints: dict[str, Counter[str]] = field(default_factory=dict)
+    action_feedback_counts: dict[str, int] = field(default_factory=dict)
 
     def remember_effect(self, action_name: str, action_key: str, effect: str) -> None:
         self.action_semantics[action_name] = effect
-        if effect != "noop":
+        if effect not in {"noop", "feedback_only"}:
             self.promising_actions.add(action_name)
             self.changed_action_keys.add(action_key)
             self.action_changed_counts[action_key] = (
                 self.action_changed_counts.get(action_key, 0) + 1
             )
-        else:
+        elif effect == "noop":
             self.action_noop_counts[action_key] = (
                 self.action_noop_counts.get(action_key, 0) + 1
             )
@@ -52,6 +53,11 @@ class GameMemory:
     def remember_reward(self, action_key: str, reward_delta: float) -> None:
         self.action_reward_counts[action_key] = (
             self.action_reward_counts.get(action_key, 0.0) + reward_delta
+        )
+
+    def remember_feedback(self, action_key: str) -> None:
+        self.action_feedback_counts[action_key] = (
+            self.action_feedback_counts.get(action_key, 0) + 1
         )
 
     def dedupe_hypotheses(self, keep_last: int = 8) -> None:
@@ -113,6 +119,7 @@ class GameMemory:
             changed_uses=changed_uses,
             noop_uses=noop_uses,
             reward_total=self.action_reward_counts.get(action_key, 0.0),
+            feedback_flashes=self.action_feedback_counts.get(action_key, 0),
             terminal_losses=self.action_terminal_loss_counts.get(action_key, 0),
             terminal_wins=0,
             avg_changed_cells=self.action_changed_cells_total.get(action_key, 0) / divisor,

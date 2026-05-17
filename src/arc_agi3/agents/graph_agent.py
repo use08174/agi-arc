@@ -88,7 +88,15 @@ class GraphSearchAgent(ArcAgentRuntime):
         return action
 
     def _learn_from_transition(self, transition: Transition) -> None:
-        if transition.changed:
+        likely_feedback_flash = bool(transition.notes.get("likely_feedback_flash", False))
+        if likely_feedback_flash:
+            self.game_memory.remember_effect(
+                transition.action.name,
+                transition.action.key,
+                "feedback_only",
+            )
+            self.game_memory.remember_feedback(transition.action.key)
+        elif transition.changed:
             self.game_memory.remember_effect(
                 transition.action.name,
                 transition.action.key,
@@ -111,4 +119,6 @@ class GraphSearchAgent(ArcAgentRuntime):
             transition.notes,
         )
         if transition.terminal and not transition.won:
+            self.game_memory.remember_danger(transition.action.key)
+        if likely_feedback_flash and transition.reward_delta <= 0:
             self.game_memory.remember_danger(transition.action.key)

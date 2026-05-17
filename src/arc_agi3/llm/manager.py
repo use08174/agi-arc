@@ -183,5 +183,5 @@ class LLMHookManager:
             f"avg_unique_color_delta={profile.avg_unique_color_delta:.1f}; "
             f"axes={top_axes}; kinds={change_kinds}; "
             f"regions={dominant_regions}; hints={interaction_hints}; "
-            f"reward_total={profile.reward_total:.1f}; terminal_losses={profile.terminal_losses}"
+            f"reward_total={profile.reward_total:.1f}; feedback_flashes={profile.feedback_flashes}; terminal_losses={profile.terminal_losses}"
         )

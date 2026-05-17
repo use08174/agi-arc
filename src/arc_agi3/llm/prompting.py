@@ -48,7 +48,14 @@ class PromptBuilder:
             lines.append("Anchor region candidates:")
             for anchor in anchors[:4]:
                 lines.append(
-                    f"- anchor={anchor['anchor']} area={anchor['area']} region={anchor['region']} bbox={anchor['bbox']}"
+                    f"- anchor={anchor['anchor']} area={anchor['area']} region={anchor['region']} color={anchor['color']} bbox={anchor['bbox']}"
+                )
+        anchor_patches = context.observation.notes.get("anchor_patch_summary", [])
+        if anchor_patches:
+            lines.append("Anchor patch states:")
+            for patch in anchor_patches[:4]:
+                lines.append(
+                    f"- anchor={patch['anchor']} region={patch['region']} nonzero={patch['nonzero']} colors={patch['colors']} signature={patch['signature']}"
                 )
         region_changes = context.observation.notes.get("region_change_summary", [])
         if region_changes:
@@ -71,6 +78,9 @@ class PromptBuilder:
         )
         lines.append(
             "Look for repeated motifs, anchor panels, and state indicators that may need to match a target before finishing."
+        )
+        lines.append(
+            "If corner or HUD patches have distinct signatures, consider whether one patch is a target and another is a mutable state that should be aligned."
         )
         lines.append(
             "Return a ranked short list of actions and optional rule hypotheses."

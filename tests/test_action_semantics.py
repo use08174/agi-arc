@@ -78,6 +78,37 @@ class ActionSemanticsTest(unittest.TestCase):
         anchors = observation.notes["anchor_region_summary"]
         self.assertTrue(any(item["anchor"] == "top_left" for item in anchors))
         self.assertTrue(any(item["anchor"] == "top_right" for item in anchors))
+        patches = observation.notes["anchor_patch_summary"]
+        self.assertTrue(any(item["anchor"] == "bottom_left" for item in patches))
+        self.assertTrue(any(item["anchor"] == "bottom_right" for item in patches))
+
+    def test_small_anchor_patch_flash_is_marked_as_feedback(self) -> None:
+        hasher = StateHasher()
+        previous = Frame(
+            grid=tuple(
+                tuple(
+                    1 if (x, y) == (3, 3) else 2 if (x, y) == (0, 14) else 0
+                    for x in range(16)
+                )
+                for y in range(16)
+            ),
+            status=GameStatus.IN_PROGRESS,
+        )
+        current = Frame(
+            grid=tuple(
+                tuple(
+                    1 if (x, y) == (4, 3) else 3 if (x, y) == (0, 14) else 0
+                    for x in range(16)
+                )
+                for y in range(16)
+            ),
+            status=GameStatus.IN_PROGRESS,
+        )
+
+        observation = hasher.observe(current, previous=previous)
+
+        self.assertTrue(observation.notes["anchor_patch_changes"])
+        self.assertTrue(observation.notes["likely_feedback_flash"])
 
 
 if __name__ == "__main__":
