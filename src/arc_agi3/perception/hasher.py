@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter
+from typing import Any
 
 from arc_agi3.core.types import Frame, Observation
 
@@ -37,9 +38,50 @@ class StateHasher:
             "hud_nonzero_count": hud_nonzero_count,
             "playfield_nonzero_count": nonzero_count - hud_nonzero_count,
         }
+        notes.update(self._region_notes(frame, hud_rows))
         if previous is not None:
             notes.update(self._diff_notes(previous, frame))
         return Observation(state_key=state_key, frame=frame, changed=changed, notes=notes)
+
+    def _region_notes(self, frame: Frame, hud_rows: int) -> dict[str, object]:
+        regions = self._extract_regions(frame, hud_rows)
+        repeated = Counter(region["shape_signature"] for region in regions if int(region["area"]) >= 3)
+        repeated_summaries = []
+        for signature, count in repeated.most_common():
+            if count < 2:
+                continue
+            members = [region for region in regions if region["shape_signature"] == signature][:3]
+            repeated_summaries.append(
+                {
+                    "count": count,
+                    "bbox": members[0]["bbox"],
+                    "region": members[0]["region"],
+                    "area": members[0]["area"],
+                }
+            )
+            if len(repeated_summaries) >= 4:
+                break
+
+        anchor_regions = sorted(
+            regions,
+            key=lambda region: (region["anchor_rank"], -int(region["area"])),
+        )[:6]
+        anchor_summary = [
+            {
+                "anchor": region["anchor_name"],
+                "bbox": region["bbox"],
+                "area": region["area"],
+                "region": region["region"],
+            }
+            for region in anchor_regions
+            if region["anchor_name"] != "center"
+        ]
+        return {
+            "salient_region_count": len(regions),
+            "salient_regions": regions[:12],
+            "repeated_motif_summary": repeated_summaries,
+            "anchor_region_summary": anchor_summary[:4],
+        }
 
     def _diff_notes(self, previous: Frame, current: Frame) -> dict[str, object]:
         changed_cells = 0
@@ -121,6 +163,7 @@ class StateHasher:
             region_bias=region_bias,
             motion_axis=motion_axis,
         )
+        region_change_summary = self._region_change_summary(previous, current)
 
         return {
             "changed_cells": changed_cells,
@@ -135,7 +178,124 @@ class StateHasher:
             "region_bias": region_bias,
             "interaction_hint": interaction_hint,
             "moved_color_candidates": moved_color_candidates,
+            "region_change_summary": region_change_summary,
         }
+
+    def _extract_regions(self, frame: Frame, hud_rows: int) -> list[dict[str, Any]]:
+        grid = frame.grid
+        height = len(grid)
+        width = len(grid[0]) if height else 0
+        seen: set[tuple[int, int]] = set()
+        regions: list[dict[str, Any]] = []
+        hud_start = max(0, height - hud_rows)
+        for y in range(height):
+            for x in range(width):
+                if (x, y) in seen or int(grid[y][x]) == 0:
+                    continue
+                stack = [(x, y)]
+                seen.add((x, y))
+                cells: list[tuple[int, int]] = []
+                while stack:
+                    cx, cy = stack.pop()
+                    cells.append((cx, cy))
+                    for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                        if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in seen and int(grid[ny][nx]) != 0:
+                            seen.add((nx, ny))
+                            stack.append((nx, ny))
+                min_x = min(cell[0] for cell in cells)
+                max_x = max(cell[0] for cell in cells)
+                min_y = min(cell[1] for cell in cells)
+                max_y = max(cell[1] for cell in cells)
+                area = len(cells)
+                bbox_grid = tuple(
+                    tuple(int(grid[row][col]) for col in range(min_x, max_x + 1))
+                    for row in range(min_y, max_y + 1)
+                )
+                shape_grid = tuple(
+                    tuple(1 if int(grid[row][col]) != 0 else 0 for col in range(min_x, max_x + 1))
+                    for row in range(min_y, max_y + 1)
+                )
+                region = "hud" if min_y >= hud_start else "playfield"
+                anchor_name, anchor_rank = self._anchor_name(
+                    min_x=min_x,
+                    min_y=min_y,
+                    max_x=max_x,
+                    max_y=max_y,
+                    width=width,
+                    height=height,
+                )
+                regions.append(
+                    {
+                        "bbox": {
+                            "min_x": min_x,
+                            "min_y": min_y,
+                            "max_x": max_x,
+                            "max_y": max_y,
+                            "width": max_x - min_x + 1,
+                            "height": max_y - min_y + 1,
+                        },
+                        "area": area,
+                        "region": region,
+                        "anchor_name": anchor_name,
+                        "anchor_rank": anchor_rank,
+                        "signature": hashlib.sha1(repr(bbox_grid).encode("utf-8")).hexdigest()[:10],
+                        "shape_signature": hashlib.sha1(repr(shape_grid).encode("utf-8")).hexdigest()[:10],
+                    }
+                )
+        regions.sort(key=lambda item: (-int(item["area"]), item["bbox"]["min_y"], item["bbox"]["min_x"]))
+        return regions
+
+    def _anchor_name(
+        self,
+        min_x: int,
+        min_y: int,
+        max_x: int,
+        max_y: int,
+        width: int,
+        height: int,
+    ) -> tuple[str, int]:
+        cx = (min_x + max_x) / 2
+        cy = (min_y + max_y) / 2
+        horizontal = "left" if cx < width * 0.33 else "right" if cx > width * 0.66 else "center"
+        vertical = "top" if cy < height * 0.33 else "bottom" if cy > height * 0.66 else "middle"
+        name = f"{vertical}_{horizontal}"
+        rank_map = {
+            "top_left": 0,
+            "top_right": 1,
+            "bottom_left": 2,
+            "bottom_right": 3,
+            "middle_left": 4,
+            "middle_right": 5,
+        }
+        return name, rank_map.get(name, 9)
+
+    def _region_change_summary(self, previous: Frame, current: Frame) -> list[str]:
+        previous_regions = self._extract_regions(previous, self._hud_rows(previous))
+        current_regions = self._extract_regions(current, self._hud_rows(current))
+        prev_signatures = Counter(region["signature"] for region in previous_regions)
+        curr_signatures = Counter(region["signature"] for region in current_regions)
+        summary: list[str] = []
+        for region in current_regions[:8]:
+            signature = region["signature"]
+            delta = curr_signatures[signature] - prev_signatures.get(signature, 0)
+            if delta <= 0:
+                continue
+            summary.append(
+                f"new_or_more_region anchor={region['anchor_name']} area={region['area']} region={region['region']}"
+            )
+            if len(summary) >= 4:
+                break
+        for region in previous_regions[:8]:
+            signature = region["signature"]
+            delta = prev_signatures[signature] - curr_signatures.get(signature, 0)
+            if delta <= 0:
+                continue
+            summary.append(
+                f"removed_or_less_region anchor={region['anchor_name']} area={region['area']} region={region['region']}"
+            )
+            if len(summary) >= 6:
+                break
+        return summary
 
     def _hud_rows(self, frame: Frame) -> int:
         height = len(frame.grid)

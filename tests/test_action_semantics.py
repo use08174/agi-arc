@@ -57,6 +57,28 @@ class ActionSemanticsTest(unittest.TestCase):
         self.assertEqual(observation.notes["region_bias"], "hud")
         self.assertEqual(observation.notes["interaction_hint"], "hud_or_counter_update")
 
+    def test_hasher_extracts_repeated_motifs_and_anchor_regions(self) -> None:
+        hasher = StateHasher()
+        frame = Frame(
+            grid=(
+                (1, 1, 0, 0, 0, 0, 2, 2),
+                (1, 0, 0, 0, 0, 0, 2, 0),
+                (0, 0, 0, 0, 0, 0, 0, 0),
+                (0, 0, 0, 0, 0, 0, 0, 0),
+                (3, 3, 0, 0, 0, 0, 4, 4),
+                (3, 0, 0, 0, 0, 0, 4, 0),
+            ),
+            status=GameStatus.IN_PROGRESS,
+        )
+
+        observation = hasher.observe(frame)
+
+        self.assertGreaterEqual(observation.notes["salient_region_count"], 4)
+        self.assertTrue(observation.notes["repeated_motif_summary"])
+        anchors = observation.notes["anchor_region_summary"]
+        self.assertTrue(any(item["anchor"] == "top_left" for item in anchors))
+        self.assertTrue(any(item["anchor"] == "top_right" for item in anchors))
+
 
 if __name__ == "__main__":
     unittest.main()

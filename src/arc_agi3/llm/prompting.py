@@ -36,6 +36,24 @@ class PromptBuilder:
         if context.candidate_action_evidence:
             lines.append("Candidate action evidence:")
             lines.extend(f"- {item}" for item in context.candidate_action_evidence[:12])
+        repeated_motifs = context.observation.notes.get("repeated_motif_summary", [])
+        if repeated_motifs:
+            lines.append("Repeated motif candidates:")
+            for motif in repeated_motifs[:4]:
+                lines.append(
+                    f"- count={motif['count']} area={motif['area']} region={motif['region']} bbox={motif['bbox']}"
+                )
+        anchors = context.observation.notes.get("anchor_region_summary", [])
+        if anchors:
+            lines.append("Anchor region candidates:")
+            for anchor in anchors[:4]:
+                lines.append(
+                    f"- anchor={anchor['anchor']} area={anchor['area']} region={anchor['region']} bbox={anchor['bbox']}"
+                )
+        region_changes = context.observation.notes.get("region_change_summary", [])
+        if region_changes:
+            lines.append("Recent region-structure changes:")
+            lines.extend(f"- {item}" for item in region_changes[:6])
         if context.latest_transitions:
             lines.append("Recent transitions:")
             lines.extend(f"- {item}" for item in context.latest_transitions[-6:])
@@ -50,6 +68,9 @@ class PromptBuilder:
         )
         lines.append(
             "Do not use nonzero pixel count as a goal by itself unless reward or win evidence supports it."
+        )
+        lines.append(
+            "Look for repeated motifs, anchor panels, and state indicators that may need to match a target before finishing."
         )
         lines.append(
             "Return a ranked short list of actions and optional rule hypotheses."
