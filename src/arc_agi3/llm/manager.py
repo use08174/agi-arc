@@ -138,23 +138,17 @@ class LLMHookManager:
         ]
         candidate_action_evidence: list[str] = []
         for action in candidate_actions:
+            profile = game_memory.semantic_profile(action.name, action.key)
             successor = graph.seen_successor(observation.state_key, action)
             if successor is None:
                 candidate_action_evidence.append(
-                    f"{action.key}: unseen-from-current-state; useful for testing a new rule"
+                    f"{action.key}: unseen-from-current-state; useful for testing a new rule; "
+                    f"global_profile={self._format_profile(profile)}"
                 )
                 continue
-            changed = action.key in game_memory.changed_action_keys
-            total_uses = game_memory.action_use_counts.get(action.key, 0)
-            changed_uses = game_memory.action_changed_counts.get(action.key, 0)
-            total_reward = game_memory.action_reward_counts.get(action.key, 0.0)
-            danger_count = game_memory.action_terminal_loss_counts.get(action.key, 0)
             candidate_action_evidence.append(
                 f"{action.key}: seen-successor={successor}; "
-                f"changed_count={changed_uses}/{total_uses}; "
-                f"total_reward={total_reward:.1f}; "
-                f"terminal_losses={danger_count}; "
-                f"changed_before={changed}"
+                f"global_profile={self._format_profile(profile)}"
             )
         return LLMContext(
             observation=observation,
@@ -176,3 +170,18 @@ class LLMHookManager:
             "transitions": context.latest_transitions[-4:],
         }
         return hashlib.sha1(repr(raw).encode("utf-8")).hexdigest()[:16]
+
+    def _format_profile(self, profile) -> str:
+        top_axes = ",".join(profile.top_motion_axes) or "none"
+        change_kinds = ",".join(profile.common_change_kinds) or "unknown"
+        dominant_regions = ",".join(profile.dominant_regions) or "unknown"
+        interaction_hints = ",".join(profile.interaction_hints) or "unknown"
+        return (
+            f"uses={profile.uses}; changed={profile.changed_uses}; noop={profile.noop_uses}; "
+            f"avg_changed_cells={profile.avg_changed_cells:.1f}; "
+            f"avg_nonzero_delta={profile.avg_nonzero_delta:.1f}; "
+            f"avg_unique_color_delta={profile.avg_unique_color_delta:.1f}; "
+            f"axes={top_axes}; kinds={change_kinds}; "
+            f"regions={dominant_regions}; hints={interaction_hints}; "
+            f"reward_total={profile.reward_total:.1f}; terminal_losses={profile.terminal_losses}"
+        )

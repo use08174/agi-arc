@@ -82,6 +82,9 @@ class PromptBuilder:
         return (
             f"size={width}x{height}; "
             f"nonzero_count={sum(1 for row in grid for value in row if value != 0)}; "
+            f"playfield_nonzero={context.observation.notes.get('playfield_nonzero_count', 'n/a')}; "
+            f"hud_nonzero={context.observation.notes.get('hud_nonzero_count', 'n/a')}; "
+            f"hud_rows_hint={context.observation.notes.get('hud_rows_hint', 'n/a')}; "
             f"colors={sorted(colors) if colors else []}; "
             f"sample_nonzero={sample}"
         )

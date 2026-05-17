@@ -29,6 +29,7 @@ class GraphSearchAgent(ArcAgentRuntime):
                 reward_delta=result.reward_delta,
                 terminal=result.done,
                 won=result.won,
+                notes=next_observation.notes,
             )
             self.graph.record(transition)
             self._learn_from_transition(transition)
@@ -104,5 +105,10 @@ class GraphSearchAgent(ArcAgentRuntime):
                 transition.action.key,
                 transition.reward_delta,
             )
+        self.game_memory.remember_transition_signature(
+            transition.action.name,
+            transition.action.key,
+            transition.notes,
+        )
         if transition.terminal and not transition.won:
             self.game_memory.remember_danger(transition.action.key)

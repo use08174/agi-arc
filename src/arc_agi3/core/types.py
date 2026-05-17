@@ -50,6 +50,7 @@ class Transition:
     reward_delta: float = 0.0
     terminal: bool = False
     won: bool = False
+    notes: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -80,6 +81,25 @@ class LLMDecisionTrace:
     raw_response: str
     ranked_actions: list[RankedAction] = field(default_factory=list)
     hypotheses: list[RuleHypothesis] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ActionSemanticProfile:
+    action_key: str
+    action_name: str
+    uses: int = 0
+    changed_uses: int = 0
+    noop_uses: int = 0
+    reward_total: float = 0.0
+    terminal_losses: int = 0
+    terminal_wins: int = 0
+    avg_changed_cells: float = 0.0
+    avg_nonzero_delta: float = 0.0
+    avg_unique_color_delta: float = 0.0
+    top_motion_axes: list[str] = field(default_factory=list)
+    common_change_kinds: list[str] = field(default_factory=list)
+    dominant_regions: list[str] = field(default_factory=list)
+    interaction_hints: list[str] = field(default_factory=list)
 
 
 DEFAULT_ACTIONS: tuple[Action, ...] = tuple(
