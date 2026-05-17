@@ -123,6 +123,10 @@ class HypothesisLibrary:
             self._support("switch_opens_path", 0.03, "visible button candidate exists")
         if world.relation_candidates:
             self._support("connect_same_feature", 0.05, world.relation_candidates[0])
+        if any(track.best_role[0] == "mutable_panel" for track in world.object_tracks.values()):
+            self._support("state_match_before_goal", 0.08, "mutable panel candidate observed")
+        if any(track.best_role[0] == "static_display" for track in world.object_tracks.values()):
+            self._contradict("collect_before_goal", 0.01, "static display candidates should not be treated as items")
 
     def observe_transition(self, world: Any, after_notes: dict[str, Any]) -> None:
         removed = list((after_notes.get("collectible_changes", {}) or {}).get("removed", []) or [])
@@ -141,6 +145,8 @@ class HypothesisLibrary:
             self._contradict("plain_navigation", 0.12, "direct progress produced failure feedback")
         if interaction_hint in {"spawn_or_unlock", "board_or_room_transform"} and world.visible_button_cells:
             self._support("switch_opens_path", 0.18, f"button-like interaction caused {interaction_hint}")
+        if interaction_hint == "hud_or_counter_update":
+            self._contradict("plain_navigation", 0.01, "HUD-only update is not task progress")
         if len([event for event in world.recent_events if event.kind == "collectible_removed"]) >= 2:
             self._support("sequence_required", 0.14, "multiple collectible interactions observed")
 

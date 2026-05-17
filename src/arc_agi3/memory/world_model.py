@@ -57,6 +57,7 @@ class ObjectTrack:
     seen_count: int = 1
     moved_count: int = 0
     disappeared_count: int = 0
+    changed_count: int = 0
     role_scores: dict[str, float] = field(default_factory=dict)
 
     def bump_role(self, role: str, amount: float) -> None:
@@ -127,6 +128,7 @@ class WorldModel:
     hypothesis_library: HypothesisLibrary = field(default_factory=HypothesisLibrary)
     relation_candidates: list[str] = field(default_factory=list)
     anchor_patch_states: dict[str, str] = field(default_factory=dict)
+    anchor_patch_change_counts: Counter[str] = field(default_factory=Counter)
     semantic_ascii_map: str = ""
     last_objects: list[dict[str, Any]] = field(default_factory=list)
     last_notes: dict[str, Any] = field(default_factory=dict)
@@ -244,6 +246,9 @@ class WorldModel:
             shape = str(obj.get("shape_signature", "")) or None
             center = _center_from_bbox(obj.get("bbox"))
             if center is None:
+                continue
+            anchor = str(obj.get("anchor", ""))
+            if role in {"display_candidate", "static_display"} or anchor.startswith("bottom_"):
                 continue
             if role in {"item", "button", "goal"}:
                 targets.append(center)
@@ -386,6 +391,9 @@ class WorldModel:
             role = str(obj.get("role", "unknown"))
             if role != "unknown":
                 track.bump_role(role, float(obj.get("confidence", 0.0) or 0.0) * 0.25)
+            anchor = str(obj.get("anchor", ""))
+            if anchor.startswith("bottom_"):
+                track.bump_role("display_candidate", 0.06)
         for track_id in unmatched:
             self.object_tracks[track_id].disappeared_count += 1
 
@@ -430,6 +438,8 @@ class WorldModel:
         if anchor_changes:
             detail = f"anchor_patches_changed={anchor_changes}"
             self._remember_event("anchor_patch_changed", detail)
+            for anchor in anchor_changes:
+                self.anchor_patch_change_counts[anchor] += 1
         if removed and anchor_changes:
             self._support_hypothesis("collection_changes_state", 0.35, f"{removed[:2]} followed by patch changes {anchor_changes}")
             self._mark_recent_disappeared_as("collectible", 0.45)
@@ -438,6 +448,7 @@ class WorldModel:
             self._support_hypothesis("goal_requires_state_match", 0.25, "feedback flash observed without reward")
             if anchor_changes:
                 self._support_hypothesis("goal_requires_state_match", 0.15, f"feedback coincided with patch changes {anchor_changes}")
+        self._update_display_roles(anchor_changes)
 
     def _remember_event(self, kind: str, detail: str) -> None:
         event = SceneEvent(kind=kind, detail=detail)
@@ -453,6 +464,28 @@ class WorldModel:
         for track in self.object_tracks.values():
             if track.disappeared_count > 0:
                 track.bump_role(role, amount)
+
+    def _update_display_roles(self, anchor_changes: list[str]) -> None:
+        for track in self.object_tracks.values():
+            role, _ = track.best_role
+            if role == "display_candidate" and track.moved_count == 0 and track.disappeared_count == 0:
+                track.bump_role("static_display", 0.04)
+        for anchor in anchor_changes:
+            for track in self.object_tracks.values():
+                anchor_guess = self._track_anchor(track)
+                if anchor_guess == anchor:
+                    track.changed_count += 1
+                    track.bump_role("mutable_panel", 0.22)
+
+    def _track_anchor(self, track: ObjectTrack) -> str:
+        width = int(self.last_notes.get("semantic_width", 0) or 0)
+        height = int(self.last_notes.get("semantic_height", 0) or 0)
+        if width <= 0 or height <= 0:
+            return ""
+        x, y = track.center
+        horizontal = "left" if x < width * 0.33 else "right" if x > width * 0.66 else "center"
+        vertical = "top" if y < height * 0.33 else "bottom" if y > height * 0.66 else "middle"
+        return f"{vertical}_{horizontal}"
 
 
 def _center_from_bbox(bbox: Any) -> Cell | None:

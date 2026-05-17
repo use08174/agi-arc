@@ -94,6 +94,12 @@ def main() -> None:
         agent = GraphSearchAgent(config=agent_config, llm_config=llm_config)
         won, steps = agent.run_episode(env)
         print(f"backend={args.backend} game_id={args.game_id} won={won} steps={steps}")
+        print(f"max_steps_budget={agent_config.budget.max_steps_per_level}")
+        print(f"episode_end_reason={agent.last_episode_end_reason}")
+        print(f"final_status={agent.last_episode_final_status}")
+        final_tool_state = agent.last_episode_final_info.get("tool_state")
+        if final_tool_state is not None:
+            print(f"final_tool_state={final_tool_state}")
         print("promising_actions=", sorted(agent.game_memory.promising_actions))
         print("known_states=", len(agent.graph.nodes))
         print(f"llm_enabled={llm_config.enabled}")

@@ -85,7 +85,10 @@ class LLMHookManager:
             if target is not None:
                 flags.append(f"predicted_target={target}")
             if action.name == "ACTION6" and action.payload:
-                flags.append(f"click=({action.payload.get('x')},{action.payload.get('y')})")
+                point = (int(action.payload.get("x", -999)), int(action.payload.get("y", -999)))
+                flags.append(f"click={point}")
+                if self._click_is_display_like(point, world):
+                    flags.append("DISPLAY_LIKE_CLICK")
             seen = "unseen-from-current-state" if successor is None else f"seen-successor={successor}"
             candidate_action_evidence.append(f"{action.key}: {seen}; {'; '.join(flags)}; global_profile={self._format_profile(profile)}")
         subgoals = world.hypothesis_library.preferred_subgoals(world)
@@ -114,6 +117,19 @@ class LLMHookManager:
             proposed_tests=world.hypothesis_library.proposed_tests(world),
             candidate_subgoals=subgoals,
         )
+
+    def _click_is_display_like(self, point: tuple[int, int], world) -> bool:
+        x, y = point
+        for obj in world.last_objects:
+            bbox = obj.get("bbox")
+            if not isinstance(bbox, dict):
+                continue
+            if not (int(bbox["min_x"]) <= x <= int(bbox["max_x"]) and int(bbox["min_y"]) <= y <= int(bbox["max_y"])):
+                continue
+            role = str(obj.get("role", "unknown"))
+            anchor = str(obj.get("anchor", ""))
+            return role in {"display_candidate", "static_display"} or anchor.startswith("bottom_")
+        return False
 
     def _cache_key(self, context: LLMContext) -> str:
         raw = {"state": context.observation.state_key, "actions": [action.key for action in context.candidate_actions], "recent_states": context.recent_states[-6:], "promising": context.known_promising_actions, "world": context.world_model_summary[:6], "transitions": context.latest_transitions[-4:]}

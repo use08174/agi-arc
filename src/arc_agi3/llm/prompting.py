@@ -12,7 +12,8 @@ class PromptBuilder:
         lines = [
             "You are helping an ARC-AGI-3 agent. The symbolic planner owns final movement; you provide ranking and rule hypotheses.",
             "Use the semantic map and world model. Do not choose arbitrary unexplored actions.",
-            "Never prefer actions marked unsafe, deadly, blocked, HUD-only, feedback-only, noop-loop, or terminal-loss.",
+                "Never prefer actions marked unsafe, deadly, blocked, HUD-only, feedback-only, noop-loop, or terminal-loss.",
+                "Never prefer actions marked DISPLAY_LIKE_CLICK unless there is direct evidence that the display itself is interactive.",
             "Prefer actions that move along a safe path to items/goals/buttons, or click objects matching learned object rules.",
             "State key: " + context.observation.state_key,
             "Status: " + status,

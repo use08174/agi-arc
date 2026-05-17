@@ -11,6 +11,9 @@ class GraphSearchAgent(ArcAgentRuntime):
     """Explore-first agent scaffold with semantic world-model updates."""
 
     def run_episode(self, env: ArcEnvironment) -> tuple[bool, int]:
+        self.last_episode_end_reason = "not_started"
+        self.last_episode_final_status = "UNKNOWN"
+        self.last_episode_final_info = {}
         self.reset_level()
         self.safety_shield = SafetyShield()
         self.understanding_agent = EnvUnderstandingAgent()
@@ -47,9 +50,15 @@ class GraphSearchAgent(ArcAgentRuntime):
             )
             self._learn_from_transition(transition)
             if result.done:
+                self.last_episode_end_reason = "environment_done"
+                self.last_episode_final_status = result.frame.status.value
+                self.last_episode_final_info = dict(result.frame.info)
                 return result.won, step_idx + 1
             observation = next_observation
             self.recent_states.append(observation.state_key)
+        self.last_episode_end_reason = "step_budget_exhausted"
+        self.last_episode_final_status = observation.frame.status.value
+        self.last_episode_final_info = dict(observation.frame.info)
         return False, self.config.budget.max_steps_per_level
 
     def _choose_action(self, step_idx: int, observation: Observation, actions: list[Action]) -> Action:

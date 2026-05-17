@@ -80,6 +80,35 @@ class WorldModelHypothesesTest(unittest.TestCase):
         self.assertTrue(world.hypothesis_library.preferred_subgoals(world))
         self.assertTrue(world.hypothesis_library.proposed_tests(world))
 
+    def test_bottom_display_becomes_mutable_panel_after_anchor_change(self) -> None:
+        world = WorldModel()
+        world.update_from_observation(
+            {
+                "semantic_width": 16,
+                "semantic_height": 16,
+                "semantic_objects": [
+                    {
+                        "color": 5,
+                        "shape_signature": "panel",
+                        "bbox": {"min_x": 1, "max_x": 2, "min_y": 13, "max_y": 14},
+                        "area": 4,
+                        "anchor": "bottom_left",
+                        "role": "display_candidate",
+                        "confidence": 0.3,
+                    }
+                ],
+            }
+        )
+        world.learn_transition(
+            action=Action(name="ACTION2"),
+            before_notes={},
+            after_notes={"anchor_patch_changes": ["bottom_left"], "collectible_changes": {"removed": [], "added": []}},
+            terminal_loss=False,
+        )
+
+        track = next(iter(world.object_tracks.values()))
+        self.assertEqual(track.best_role[0], "mutable_panel")
+
 
 if __name__ == "__main__":
     unittest.main()

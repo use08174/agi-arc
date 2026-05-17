@@ -5,6 +5,7 @@ import unittest
 from arc_agi3.core.types import Action, Frame, GameStatus
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.perception.hasher import StateHasher
+from arc_agi3.perception.map_parser import MapParser
 
 
 class ActionSemanticsTest(unittest.TestCase):
@@ -110,6 +111,31 @@ class ActionSemanticsTest(unittest.TestCase):
 
         self.assertTrue(observation.notes["anchor_patch_changes"])
         self.assertTrue(observation.notes["likely_feedback_flash"])
+
+    def test_bottom_small_object_is_display_candidate_not_item(self) -> None:
+        parser = MapParser()
+        frame = Frame(
+            grid=tuple(
+                tuple(
+                    7
+                    if 5 <= x <= 6 and 4 <= y <= 5
+                    else 5
+                    if 1 <= x <= 2 and 13 <= y <= 14
+                    else 0
+                    for x in range(16)
+                )
+                for y in range(16)
+            ),
+            status=GameStatus.IN_PROGRESS,
+        )
+
+        semantic = parser.parse(frame)
+
+        bottom_item_centers = [
+            ((item["bbox"]["min_x"] + item["bbox"]["max_x"]) // 2, (item["bbox"]["min_y"] + item["bbox"]["max_y"]) // 2)
+            for item in semantic.items
+        ]
+        self.assertNotIn((1, 13), bottom_item_centers)
 
 
 if __name__ == "__main__":

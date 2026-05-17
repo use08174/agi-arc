@@ -122,6 +122,7 @@ class MapParser:
                         "bbox": bbox,
                         "area": len(cells),
                         "shape_signature": hashlib.sha1(repr(shape).encode("utf-8")).hexdigest()[:10],
+                        "anchor": _anchor_name(min_x, min_y, max_x, max_y, width, hud_start),
                         "role": "unknown",
                         "confidence": 0.0,
                     }
@@ -185,10 +186,14 @@ class MapParser:
             touches_edge = bbox["min_x"] == 0 or bbox["min_y"] == 0 or bbox["max_x"] >= width - 1 or bbox["max_y"] >= height - 1
             long_bar = bbox["width"] >= max(6, width // 4) or bbox["height"] >= max(6, height // 4)
             repeated = shape_counts[str(obj.get("shape_signature"))] >= 2
+            anchor = str(obj.get("anchor", "middle_center"))
             if touches_edge or long_bar or area >= max(20, width * height // 18):
                 obj["role"] = "wall"
                 obj["confidence"] = 0.55
                 walls.append(obj)
+            elif anchor.startswith("bottom_") and area <= 32:
+                obj["role"] = "display_candidate"
+                obj["confidence"] = 0.30
             elif area <= 12 and repeated:
                 obj["role"] = "item"
                 obj["confidence"] = 0.55
@@ -256,3 +261,11 @@ class MapParser:
 
 def _center(bbox: dict[str, Any]) -> tuple[int, int]:
     return ((int(bbox["min_x"]) + int(bbox["max_x"])) // 2, (int(bbox["min_y"]) + int(bbox["max_y"])) // 2)
+
+
+def _anchor_name(min_x: int, min_y: int, max_x: int, max_y: int, width: int, height: int) -> str:
+    cx = (min_x + max_x) / 2
+    cy = (min_y + max_y) / 2
+    horizontal = "left" if cx < width * 0.33 else "right" if cx > width * 0.66 else "center"
+    vertical = "top" if cy < height * 0.33 else "bottom" if cy > height * 0.66 else "middle"
+    return f"{vertical}_{horizontal}"

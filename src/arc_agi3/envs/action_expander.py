@@ -31,11 +31,12 @@ class ActionExpander:
         if width == 0:
             return [Action(name="ACTION6", payload={"x": 32, "y": 32})]
         points: list[tuple[int, int]] = []
+        hud_rows = self._hud_rows(height)
+        hud_start = max(1, height - hud_rows)
         points.extend(self._object_centers(frame))
-        center = (width // 2, max(0, (height - max(2, min(8, height // 6))) // 2))
+        center = (width // 2, max(0, hud_start // 2))
         points.append(center)
         steps = max(1, self.config.grid_points_per_axis)
-        hud_start = max(1, height - max(2, min(8, height // 6)))
         for y in self._linspace_indices(hud_start, steps):
             for x in self._linspace_indices(width, steps):
                 points.append((x, y))
@@ -73,7 +74,7 @@ class ActionExpander:
         grid = frame.grid
         height = len(grid)
         width = len(grid[0]) if height else 0
-        hud_rows = max(2, min(8, height // 6)) if height else 0
+        hud_rows = self._hud_rows(height)
         hud_start = max(0, height - hud_rows)
         seen: set[tuple[int, int]] = set()
         regions: list[dict[str, Any]] = []
@@ -110,9 +111,13 @@ class ActionExpander:
                 )
         return regions
 
+    def _hud_rows(self, height: int) -> int:
+        if height < 4:
+            return 0
+        return max(2, min(8, height // 6))
+
     def _linspace_indices(self, size: int, steps: int) -> list[int]:
         if steps <= 1:
             return [size // 2]
         max_index = max(0, size - 1)
         return sorted({min(max_index, round(idx * max_index / (steps - 1))) for idx in range(steps)})
-
