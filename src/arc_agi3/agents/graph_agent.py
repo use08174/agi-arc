@@ -48,6 +48,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         observation: Observation,
         actions: list[Action],
     ) -> Action:
+        actions = self._filter_useless_actions(observation, actions)
         ranked_actions = self.llm.rank_actions(
             observation=observation,
             candidate_actions=actions,
@@ -84,7 +85,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             recent_states=set(self.recent_states),
         )
         if action is None:
-            return actions[0]
+            return self._fallback_action(observation, actions)
         return action
 
     def _learn_from_transition(self, transition: Transition) -> None:
@@ -129,3 +130,25 @@ class GraphSearchAgent(ArcAgentRuntime):
             self.game_memory.remember_danger(transition.action.key)
         if likely_feedback_flash and transition.reward_delta <= 0:
             self.game_memory.remember_danger(transition.action.key)
+
+    def _filter_useless_actions(
+        self,
+        observation: Observation,
+        actions: list[Action],
+    ) -> list[Action]:
+        filtered = [
+            action
+            for action in actions
+            if not self.graph.action_is_probably_useless(observation.state_key, action)
+        ]
+        return filtered or actions
+
+    def _fallback_action(
+        self,
+        observation: Observation,
+        actions: list[Action],
+    ) -> Action:
+        for action in actions:
+            if not self.graph.action_is_probably_useless(observation.state_key, action):
+                return action
+        return actions[0]

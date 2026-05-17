@@ -131,6 +131,12 @@ Rules:
             "do_sample": self.config.temperature > 0,
             "temperature": self.config.temperature if self.config.temperature > 0 else None,
             "top_p": self.config.top_p,
+            "pad_token_id": (
+                loaded.tokenizer.pad_token_id
+                if loaded.tokenizer.pad_token_id is not None
+                else loaded.tokenizer.eos_token_id
+            ),
+            "eos_token_id": loaded.tokenizer.eos_token_id,
         }
         generation_kwargs = {k: v for k, v in generation_kwargs.items() if v is not None}
         generated_ids = loaded.model.generate(**model_inputs, **generation_kwargs)
