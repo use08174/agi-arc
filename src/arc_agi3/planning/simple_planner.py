@@ -41,7 +41,15 @@ class SimplePlanner:
 
         ranked = []
         for action in actions:
-            if action.name not in game_memory.promising_actions:
+            profile = game_memory.semantic_profile(action.name, action.key)
+
+            is_promising = (
+                action.key in game_memory.changed_action_keys
+                or profile.reward_total > 0
+                or profile.collectible_progress > 0
+            )
+
+            if not is_promising:
                 continue
             if action.key in game_memory.dangerous_action_keys:
                 continue
@@ -49,7 +57,6 @@ class SimplePlanner:
                 continue
             successor = graph.seen_successor(observation.state_key, action)
             node = graph.nodes.get(successor) if successor is not None else None
-            profile = game_memory.semantic_profile(action.name, action.key)
             hints = set(profile.interaction_hints)
             collectible_candidates_exist = int(observation.notes.get("collectible_candidate_count", 0) or 0) > 0
             ranked.append(

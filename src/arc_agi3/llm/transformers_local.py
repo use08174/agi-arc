@@ -84,21 +84,33 @@ class TransformersLocalProvider:
     def _build_prompt(self, context: LLMContext) -> str:
         base = self.prompt_builder.build(context)
         output_format = """
+Respond in strict JSON only. Do not write markdown. Do not continue the chat.
 
-Respond in strict JSON with this schema:
+Use this schema:
 {
   "ranked_actions": [
-    {"action": "ACTION_NAME_OR_ACTION|x=..,y=..", "score": 0.0, "reason": "short reason"}
+    {
+      "action": "one exact action key from Candidate actions",
+      "score": 0-100,
+      "reason": "short reason based on evidence"
+    }
   ],
   "hypotheses": [
-    {"summary": "short rule hypothesis", "confidence": 0.0, "evidence": ["fact 1", "fact 2"]}
+    {
+      "summary": "short rule hypothesis",
+      "confidence": 0-1,
+      "evidence": ["fact 1", "fact 2"]
+    }
   ]
 }
 
 Rules:
-- Only mention actions from the candidate list.
+- Only mention exact action keys from Candidate actions.
 - Return at most 3 ranked actions.
-- Be concise.
+- Use score 100 for the best action, lower for weaker actions.
+- Penalize actions with HUD-only, feedback-only, noop, loop, or terminal-loss evidence.
+- Prefer actions with playfield change, reward, collectible progress, or setup progress.
+- Return JSON only.
 """
         return base + output_format
 
@@ -144,7 +156,24 @@ Rules:
             output_ids[len(input_ids) :]
             for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
         ]
-        return loaded.tokenizer.batch_decode(trimmed_ids, skip_special_tokens=True)[0]
+        decoded = loaded.tokenizer.batch_decode(trimmed_ids, skip_special_tokens=True)[0]
+
+        # Some local instruct models may continue with template-like turns.
+        stop_markers = [
+            "<|repo_name|>",
+            "<|im_start|>",
+            "<|im_end|>",
+            "\nuser\n",
+            "\nsystem\n",
+            "\nassistant\n",
+        ]
+
+        for marker in stop_markers:
+            idx = decoded.find(marker)
+            if idx != -1:
+                decoded = decoded[:idx]
+
+        return decoded.strip()
 
     def _parse_response(
         self,
@@ -243,7 +272,7 @@ Rules:
                 if action.key in line and action.key not in seen:
                     seen.add(action.key)
                     ranked_actions.append(
-                        RankedAction(action=action, score=float(len(candidate_actions) - len(ranked_actions)), reason="fallback parse")
+                        RankedAction(action=action, score=1.0, reason="fallback parse")
                     )
                     break
             if len(ranked_actions) >= self.config.max_ranked_actions:

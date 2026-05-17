@@ -30,11 +30,13 @@ class GameMemory:
     action_interaction_hints: dict[str, Counter[str]] = field(default_factory=dict)
     action_feedback_counts: dict[str, int] = field(default_factory=dict)
     action_collectible_progress_counts: dict[str, int] = field(default_factory=dict)
+    promising_action_keys: set[str] = field(default_factory=set)
 
     def remember_effect(self, action_name: str, action_key: str, effect: str) -> None:
         self.action_semantics[action_name] = effect
         if effect not in {"noop", "feedback_only"}:
-            self.promising_actions.add(action_name)
+            self.promising_actions.add(action_name)          # 기존 호환용
+            self.promising_action_keys.add(action_key)       # 실제 decision용
             self.changed_action_keys.add(action_key)
             self.action_changed_counts[action_key] = (
                 self.action_changed_counts.get(action_key, 0) + 1

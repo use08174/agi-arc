@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from matplotlib import lines
+
 from arc_agi3.llm.types import LLMContext
 
 
@@ -102,6 +104,21 @@ class PromptBuilder:
         )
         lines.append(
             "Return a ranked short list of actions and optional rule hypotheses."
+        )
+        lines.append(
+            "Important: HUD/counter/action-limit-bar changes alone are not progress."
+        )
+        lines.append(
+            "Prefer actions that changed the playfield, collected an object, unlocked a region, or increased reward."
+        )
+        lines.append(
+            "Avoid actions whose only evidence is feedback_only, hud_or_counter_update, noop, recent loop, or terminal loss."
+        )
+        lines.append(
+            "If several actions are similar, choose the one with the strongest action-key-specific evidence, not just the same action name."
+        )
+        lines.append(
+            "Use the exact action key including coordinates, for example ACTION6|x=32,y=32."
         )
         return "\n".join(lines)
 

@@ -89,46 +89,69 @@ class GraphSearchAgent(ArcAgentRuntime):
         return action
 
     def _learn_from_transition(self, transition: Transition) -> None:
-        likely_feedback_flash = bool(transition.notes.get("likely_feedback_flash", False))
-        if likely_feedback_flash:
+        notes = transition.notes
+
+        likely_feedback_flash = bool(notes.get("likely_feedback_flash", False))
+        changed_playfield_cells = int(notes.get("changed_playfield_cells", 0) or 0)
+        changed_hud_cells = int(notes.get("changed_hud_cells", 0) or 0)
+        collectible_progress = bool(notes.get("collectible_progress", False))
+
+        hud_only_change = (
+            changed_hud_cells > 0
+            and changed_playfield_cells == 0
+            and transition.reward_delta <= 0
+            and not collectible_progress
+        )
+
+        meaningful_change = (
+            changed_playfield_cells > 0
+            or transition.reward_delta > 0
+            or collectible_progress
+        )
+
+        if likely_feedback_flash or hud_only_change:
             self.game_memory.remember_effect(
                 transition.action.name,
                 transition.action.key,
                 "feedback_only",
             )
             self.game_memory.remember_feedback(transition.action.key)
-        elif transition.changed:
+
+        elif meaningful_change:
             self.game_memory.remember_effect(
                 transition.action.name,
                 transition.action.key,
                 "changed_state",
             )
+
         else:
             self.game_memory.remember_effect(
                 transition.action.name,
                 transition.action.key,
                 "noop",
             )
+
         if transition.reward_delta != 0:
             self.game_memory.remember_reward(
                 transition.action.key,
                 transition.reward_delta,
             )
+
         self.game_memory.remember_transition_signature(
             transition.action.name,
             transition.action.key,
             transition.notes,
         )
-        if bool(transition.notes.get("collectible_progress", False)):
+
+        if collectible_progress:
             self.game_memory.remember_collectible_progress(transition.action.key)
             self.game_memory.remember_effect(
                 transition.action.name,
                 transition.action.key,
                 "collectible_progress",
             )
+
         if transition.terminal and not transition.won:
-            self.game_memory.remember_danger(transition.action.key)
-        if likely_feedback_flash and transition.reward_delta <= 0:
             self.game_memory.remember_danger(transition.action.key)
 
     def _filter_useless_actions(

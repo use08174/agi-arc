@@ -14,20 +14,33 @@ class StateHasher:
     """
 
     def observe(self, frame: Frame, previous: Frame | None = None) -> Observation:
-        encoded = repr((frame.grid, frame.info.get("levels_completed", 0))).encode(
-            "utf-8"
-        )
+        playfield_grid = self._playfield_grid(frame)
+
+        encoded = repr(
+            (
+                playfield_grid,
+                frame.info.get("levels_completed", 0),
+                frame.status.value,
+            )
+        ).encode("utf-8")
+
         state_key = hashlib.sha1(encoded).hexdigest()[:12]
-        changed = previous is None or previous.grid != frame.grid
+
+        if previous is None:
+            changed = True
+        else:
+            changed = self._playfield_grid(previous) != playfield_grid
+
         nonzero_count = sum(1 for row in frame.grid for value in row if value != 0)
         colors = sorted({int(value) for row in frame.grid for value in row if value != 0})
         hud_rows = self._hud_rows(frame)
-        hud_nonzero_count = sum(
-            1
-            for row in frame.grid[-hud_rows:]
-            for value in row
-            if value != 0
-        ) if hud_rows > 0 else 0
+
+        hud_nonzero_count = (
+            sum(1 for row in frame.grid[-hud_rows:] for value in row if value != 0)
+            if hud_rows > 0
+            else 0
+        )
+
         notes = {
             "status": frame.status.value,
             "levels_completed": frame.info.get("levels_completed", 0),
@@ -38,10 +51,29 @@ class StateHasher:
             "hud_nonzero_count": hud_nonzero_count,
             "playfield_nonzero_count": nonzero_count - hud_nonzero_count,
         }
+
         notes.update(self._region_notes(frame, hud_rows))
+
         if previous is not None:
             notes.update(self._diff_notes(previous, frame))
-        return Observation(state_key=state_key, frame=frame, changed=changed, notes=notes)
+
+        return Observation(
+            state_key=state_key,
+            frame=frame,
+            changed=changed,
+            notes=notes,
+        )
+    def _playfield_grid(self, frame: Frame) -> tuple[tuple[int, ...], ...]:
+        grid = frame.grid
+        if not grid:
+            return grid
+
+        hud_rows = self._hud_rows(frame)
+        if hud_rows <= 0:
+            return grid
+
+        cutoff = max(0, len(grid) - hud_rows)
+        return tuple(tuple(int(value) for value in row) for row in grid[:cutoff])
 
     def _region_notes(self, frame: Frame, hud_rows: int) -> dict[str, object]:
         regions = self._extract_regions(frame, hud_rows)
