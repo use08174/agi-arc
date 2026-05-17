@@ -80,6 +80,8 @@ class LLMHookManager:
             successor = graph.seen_successor(observation.state_key, action)
             target = world.predicted_target(world.player_pos, action.name)
             flags = []
+            if action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys:
+                flags.append("RESET_LIKE")
             if world.is_unsafe_action(action):
                 flags.append("UNSAFE_BY_WORLD_MODEL")
             if target is not None:
@@ -106,6 +108,7 @@ class LLMHookManager:
             recent_states=recent_states,
             known_promising_actions=sorted(game_memory.promising_action_keys or game_memory.promising_actions),
             known_dangerous_actions=sorted(game_memory.dangerous_action_keys),
+            known_reset_like_actions=sorted(game_memory.reset_like_action_keys or game_memory.reset_like_action_names),
             candidate_action_evidence=candidate_action_evidence,
             latest_transitions=latest_transitions,
             prior_hypotheses=game_memory.hypotheses,

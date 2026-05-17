@@ -22,6 +22,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         self.game_memory.world_model.update_from_observation(observation.notes)
         self.understanding_agent.inspect(env, observation, self.game_memory)
         self.graph.touch(observation.state_key, terminal=False)
+        self.initial_state_key = observation.state_key
         self.recent_states.append(observation.state_key)
         for step_idx in range(self.config.budget.max_steps_per_level):
             actions = env.valid_actions()
@@ -49,6 +50,7 @@ class GraphSearchAgent(ArcAgentRuntime):
                 terminal_loss=result.done and not result.won,
             )
             self._learn_from_transition(transition)
+            self._learn_meta_action(transition)
             if result.done:
                 self.last_episode_end_reason = "environment_done"
                 self.last_episode_final_status = result.frame.status.value
@@ -128,12 +130,23 @@ class GraphSearchAgent(ArcAgentRuntime):
     def _filter_useless_actions(self, observation: Observation, actions: list[Action]) -> list[Action]:
         filtered = []
         for action in actions:
+            if action.name in self.game_memory.reset_like_action_names or action.key in self.game_memory.reset_like_action_keys:
+                continue
             if self.game_memory.world_model.is_unsafe_action(action):
                 continue
             if self.graph.action_is_probably_useless(observation.state_key, action):
                 continue
             filtered.append(action)
         return filtered or actions
+
+    def _learn_meta_action(self, transition: Transition) -> None:
+        if transition.won or transition.reward_delta > 0:
+            return
+        if transition.to_state != getattr(self, "initial_state_key", None):
+            return
+        if transition.from_state == transition.to_state:
+            return
+        self.game_memory.remember_reset_like(transition.action.name, transition.action.key)
 
     def _fallback_action(self, observation: Observation, actions: list[Action]) -> Action:
         for action in actions:

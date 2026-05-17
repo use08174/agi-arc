@@ -23,6 +23,8 @@ class FrontierExplorer:
         world = game_memory.world_model
         ranked = []
         for index, action in enumerate(actions):
+            if action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys:
+                continue
             if world.is_unsafe_action(action):
                 continue
             successor = graph.seen_successor(observation.state_key, action)
@@ -87,10 +89,13 @@ class FrontierExplorer:
 
         def bucket(action: Action) -> tuple:
             unsafe = world.is_unsafe_action(action)
+            reset_like = action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys
             successor = graph.seen_successor(observation.state_key, action)
             unseen = successor is None
             score = -score_by_key.get(action.key, 0.0)
             rank_index = index_by_key.get(action.key, 10**6)
+            if reset_like:
+                return (10, rank_index, action.key)
             if unsafe:
                 return (9, rank_index, action.key)
             if action.key in game_memory.promising_action_keys:

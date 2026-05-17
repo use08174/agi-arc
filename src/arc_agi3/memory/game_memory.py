@@ -17,6 +17,8 @@ class GameMemory:
     solved_level_paths: list[list[str]] = field(default_factory=list)
     changed_action_keys: set[str] = field(default_factory=set)
     dangerous_action_keys: set[str] = field(default_factory=set)
+    reset_like_action_keys: set[str] = field(default_factory=set)
+    reset_like_action_names: set[str] = field(default_factory=set)
     hypotheses: list[RuleHypothesis] = field(default_factory=list)
     action_use_counts: dict[str, int] = field(default_factory=dict)
     action_changed_counts: dict[str, int] = field(default_factory=dict)
@@ -57,6 +59,11 @@ class GameMemory:
 
     def remember_collectible_progress(self, action_key: str) -> None:
         self.action_collectible_progress_counts[action_key] = self.action_collectible_progress_counts.get(action_key, 0) + 1
+
+    def remember_reset_like(self, action_name: str, action_key: str) -> None:
+        self.reset_like_action_names.add(action_name)
+        self.reset_like_action_keys.add(action_key)
+        self.action_semantics[action_name] = "reset_like"
 
     def dedupe_hypotheses(self, keep_last: int = 8) -> None:
         seen: set[str] = set()
@@ -145,4 +152,3 @@ class GameMemory:
         if changed_cells >= 16:
             return "large_area_transform"
         return "local_transform"
-

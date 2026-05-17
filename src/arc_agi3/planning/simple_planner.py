@@ -35,6 +35,8 @@ class SimplePlanner:
 
         terminal_candidates = []
         for action in actions:
+            if action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys:
+                continue
             if world.is_unsafe_action(action):
                 continue
             successor = graph.seen_successor(observation.state_key, action)
@@ -48,6 +50,8 @@ class SimplePlanner:
 
         ranked = []
         for action in actions:
+            if action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys:
+                continue
             profile = game_memory.semantic_profile(action.name, action.key)
             is_promising = (
                 action.key in game_memory.promising_action_keys

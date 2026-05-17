@@ -23,6 +23,8 @@ class SafetyShield:
 
     def is_safe(self, action: Action, observation: Observation, game_memory: GameMemory) -> bool:
         world = game_memory.world_model
+        if action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys:
+            return False
         if action.payload and action.key in game_memory.dangerous_action_keys:
             # Coordinate clicks are specific enough to blacklist globally.
             return False
