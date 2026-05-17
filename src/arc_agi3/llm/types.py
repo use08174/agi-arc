@@ -12,6 +12,7 @@ class LLMContext:
     recent_states: list[str]
     known_promising_actions: list[str]
     known_dangerous_actions: list[str] = field(default_factory=list)
+    candidate_action_evidence: list[str] = field(default_factory=list)
     latest_transitions: list[str] = field(default_factory=list)
     prior_hypotheses: list[RuleHypothesis] = field(default_factory=list)
 

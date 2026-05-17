@@ -55,7 +55,14 @@ class GraphSearchAgent(ArcAgentRuntime):
             recent_states=list(self.recent_states),
             step_idx=step_idx,
         )
-        actions = self.explorer.reorder_with_rankings(actions, ranked_actions)
+        actions = self.explorer.reorder_with_rankings(
+            observation=observation,
+            actions=actions,
+            ranked_actions=ranked_actions,
+            graph=self.graph,
+            game_memory=self.game_memory,
+            force_exploration=step_idx < self.config.budget.explore_phase_steps,
+        )
 
         if step_idx >= self.config.budget.explore_phase_steps:
             plan = self.planner.build_plan(
@@ -91,6 +98,11 @@ class GraphSearchAgent(ArcAgentRuntime):
                 transition.action.name,
                 transition.action.key,
                 "noop",
+            )
+        if transition.reward_delta != 0:
+            self.game_memory.remember_reward(
+                transition.action.key,
+                transition.reward_delta,
             )
         if transition.terminal and not transition.won:
             self.game_memory.remember_danger(transition.action.key)

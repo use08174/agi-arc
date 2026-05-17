@@ -41,7 +41,14 @@ class LLMRankingTest(unittest.TestCase):
             recent_states=[],
             step_idx=8,
         )
-        reordered = agent.explorer.reorder_with_rankings(actions, ranked)
+        reordered = agent.explorer.reorder_with_rankings(
+            observation=observation,
+            actions=actions,
+            ranked_actions=ranked,
+            graph=StateGraph(),
+            game_memory=GameMemory(),
+            force_exploration=False,
+        )
         self.assertEqual(reordered[0].name, "ACTION4")
 
     def test_transformers_provider_parses_fenced_json(self) -> None:
@@ -61,6 +68,28 @@ class LLMRankingTest(unittest.TestCase):
         self.assertEqual(len(bundle.ranked_actions), 1)
         self.assertEqual(bundle.ranked_actions[0].action.name, "ACTION3")
         self.assertEqual(bundle.ranked_actions[0].reason, "test direct move")
+
+    def test_unseen_actions_stay_ahead_of_seen_ranked_actions_during_exploration(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig(), llm_config=LLMConfig(enabled=True))
+        observation = Observation(state_key="s0", frame=None, changed=True)  # type: ignore[arg-type]
+        actions = [Action(name="ACTION1"), Action(name="ACTION2"), Action(name="ACTION3")]
+        graph = StateGraph()
+        graph.touch("s0")
+        graph.nodes["s0"].outgoing["ACTION1"] = "s1"
+        graph.nodes["s0"].outgoing["ACTION2"] = "s2"
+        ranked = [
+            RankedAction(action=actions[1], score=1.0, reason="prefer seen action2"),
+            RankedAction(action=actions[0], score=0.9, reason="prefer seen action1"),
+        ]
+        reordered = agent.explorer.reorder_with_rankings(
+            observation=observation,
+            actions=actions,
+            ranked_actions=ranked,
+            graph=graph,
+            game_memory=GameMemory(),
+            force_exploration=True,
+        )
+        self.assertEqual(reordered[0].name, "ACTION3")
 
 
 if __name__ == "__main__":

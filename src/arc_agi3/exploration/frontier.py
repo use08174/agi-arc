@@ -54,15 +54,36 @@ class FrontierExplorer:
 
     def reorder_with_rankings(
         self,
+        observation: Observation,
         actions: list[Action],
         ranked_actions: list[RankedAction],
+        graph: StateGraph,
+        game_memory: GameMemory,
+        force_exploration: bool = False,
     ) -> list[Action]:
         if not ranked_actions:
             return actions
 
+        def bucket(action: Action) -> int:
+            unseen = graph.seen_successor(observation.state_key, action) is None
+            dangerous = action.key in game_memory.dangerous_action_keys
+            if dangerous:
+                return 3
+            if unseen:
+                return 0
+            if force_exploration:
+                return 2
+            return 1
+
         ranked_keys = [item.action.key for item in ranked_actions]
         by_key = {action.key: action for action in actions}
-        ordered = [by_key[key] for key in ranked_keys if key in by_key]
-        seen = {action.key for action in ordered}
-        ordered.extend(action for action in actions if action.key not in seen)
+        score_index = {key: idx for idx, key in enumerate(ranked_keys)}
+        ordered = sorted(
+            actions,
+            key=lambda action: (
+                bucket(action),
+                score_index.get(action.key, 10**6),
+                action.key,
+            ),
+        )
         return ordered

@@ -33,6 +33,9 @@ class PromptBuilder:
         ]
         for action in context.candidate_actions:
             lines.append(f"- {action.key}")
+        if context.candidate_action_evidence:
+            lines.append("Candidate action evidence:")
+            lines.extend(f"- {item}" for item in context.candidate_action_evidence[:12])
         if context.latest_transitions:
             lines.append("Recent transitions:")
             lines.extend(f"- {item}" for item in context.latest_transitions[-6:])
@@ -42,6 +45,12 @@ class PromptBuilder:
                 f"- {hyp.summary} (confidence={hyp.confidence:.2f})"
                 for hyp in context.prior_hypotheses[-5:]
             )
+        lines.append(
+            "Prefer unexplored actions over repeated zero-reward actions unless there is direct evidence of progress."
+        )
+        lines.append(
+            "Do not use nonzero pixel count as a goal by itself unless reward or win evidence supports it."
+        )
         lines.append(
             "Return a ranked short list of actions and optional rule hypotheses."
         )

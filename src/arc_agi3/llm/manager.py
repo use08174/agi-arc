@@ -84,6 +84,7 @@ class LLMHookManager:
         self._call_count += 1
         if bundle.hypotheses:
             game_memory.hypotheses.extend(bundle.hypotheses)
+            game_memory.dedupe_hypotheses()
         ranked = bundle.ranked_actions[: self.config.max_ranked_actions]
         if self.config.cache_enabled:
             self._cache[cache_key] = ranked
@@ -135,12 +136,33 @@ class LLMHookManager:
             )
             for transition in graph.transitions[-8:]
         ]
+        candidate_action_evidence: list[str] = []
+        for action in candidate_actions:
+            successor = graph.seen_successor(observation.state_key, action)
+            if successor is None:
+                candidate_action_evidence.append(
+                    f"{action.key}: unseen-from-current-state; useful for testing a new rule"
+                )
+                continue
+            changed = action.key in game_memory.changed_action_keys
+            total_uses = game_memory.action_use_counts.get(action.key, 0)
+            changed_uses = game_memory.action_changed_counts.get(action.key, 0)
+            total_reward = game_memory.action_reward_counts.get(action.key, 0.0)
+            danger_count = game_memory.action_terminal_loss_counts.get(action.key, 0)
+            candidate_action_evidence.append(
+                f"{action.key}: seen-successor={successor}; "
+                f"changed_count={changed_uses}/{total_uses}; "
+                f"total_reward={total_reward:.1f}; "
+                f"terminal_losses={danger_count}; "
+                f"changed_before={changed}"
+            )
         return LLMContext(
             observation=observation,
             candidate_actions=candidate_actions,
             recent_states=recent_states,
             known_promising_actions=sorted(game_memory.promising_actions),
             known_dangerous_actions=sorted(game_memory.dangerous_action_keys),
+            candidate_action_evidence=candidate_action_evidence,
             latest_transitions=latest_transitions,
             prior_hypotheses=game_memory.hypotheses,
         )
