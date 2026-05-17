@@ -13,8 +13,11 @@ class LLMContext:
     recent_states: list[str]
     known_promising_actions: list[str]
     known_dangerous_actions: list[str] = field(default_factory=list)
-    known_reset_like_actions: list[str] = field(default_factory=list)
+    known_restart_like_actions: list[str] = field(default_factory=list)
+    known_undo_like_actions: list[str] = field(default_factory=list)
+    known_failure_revert_actions: list[str] = field(default_factory=list)
     candidate_action_evidence: list[str] = field(default_factory=list)
+    learned_action_semantics: list[str] = field(default_factory=list)
     latest_transitions: list[str] = field(default_factory=list)
     prior_hypotheses: list[RuleHypothesis] = field(default_factory=list)
     semantic_ascii_map: str = ""

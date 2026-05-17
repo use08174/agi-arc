@@ -35,7 +35,7 @@ class SimplePlanner:
 
         terminal_candidates = []
         for action in actions:
-            if action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys:
+            if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
             if world.is_unsafe_action(action):
                 continue
@@ -50,9 +50,10 @@ class SimplePlanner:
 
         ranked = []
         for action in actions:
-            if action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys:
+            if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
             profile = game_memory.semantic_profile(action.name, action.key)
+            learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
             is_promising = (
                 action.key in game_memory.promising_action_keys
                 or action.key in game_memory.changed_action_keys
@@ -60,6 +61,8 @@ class SimplePlanner:
                 or profile.collectible_progress > 0
             )
             if not is_promising:
+                continue
+            if learned_label in {"restart_like", "hud_only"} and learned_confidence >= 0.6:
                 continue
             if world.is_unsafe_action(action):
                 continue

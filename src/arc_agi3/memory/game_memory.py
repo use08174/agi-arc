@@ -4,6 +4,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from arc_agi3.core.types import ActionSemanticProfile, RuleHypothesis
+from arc_agi3.memory.action_semantics import ActionSemanticsModel
 from arc_agi3.memory.world_model import WorldModel
 
 
@@ -17,8 +18,12 @@ class GameMemory:
     solved_level_paths: list[list[str]] = field(default_factory=list)
     changed_action_keys: set[str] = field(default_factory=set)
     dangerous_action_keys: set[str] = field(default_factory=set)
-    reset_like_action_keys: set[str] = field(default_factory=set)
-    reset_like_action_names: set[str] = field(default_factory=set)
+    restart_like_action_keys: set[str] = field(default_factory=set)
+    restart_like_action_names: set[str] = field(default_factory=set)
+    undo_like_action_keys: set[str] = field(default_factory=set)
+    undo_like_action_names: set[str] = field(default_factory=set)
+    failure_revert_action_keys: set[str] = field(default_factory=set)
+    failure_revert_action_names: set[str] = field(default_factory=set)
     hypotheses: list[RuleHypothesis] = field(default_factory=list)
     action_use_counts: dict[str, int] = field(default_factory=dict)
     action_changed_counts: dict[str, int] = field(default_factory=dict)
@@ -34,6 +39,7 @@ class GameMemory:
     action_interaction_hints: dict[str, Counter[str]] = field(default_factory=dict)
     action_feedback_counts: dict[str, int] = field(default_factory=dict)
     action_collectible_progress_counts: dict[str, int] = field(default_factory=dict)
+    learned_action_semantics: ActionSemanticsModel = field(default_factory=ActionSemanticsModel)
     world_model: WorldModel = field(default_factory=WorldModel)
 
     def remember_effect(self, action_name: str, action_key: str, effect: str) -> None:
@@ -60,10 +66,20 @@ class GameMemory:
     def remember_collectible_progress(self, action_key: str) -> None:
         self.action_collectible_progress_counts[action_key] = self.action_collectible_progress_counts.get(action_key, 0) + 1
 
-    def remember_reset_like(self, action_name: str, action_key: str) -> None:
-        self.reset_like_action_names.add(action_name)
-        self.reset_like_action_keys.add(action_key)
-        self.action_semantics[action_name] = "reset_like"
+    def remember_restart_like(self, action_name: str, action_key: str) -> None:
+        self.restart_like_action_names.add(action_name)
+        self.restart_like_action_keys.add(action_key)
+        self.action_semantics[action_name] = "restart_like"
+
+    def remember_undo_like(self, action_name: str, action_key: str) -> None:
+        self.undo_like_action_names.add(action_name)
+        self.undo_like_action_keys.add(action_key)
+        self.action_semantics[action_name] = "undo_like"
+
+    def remember_failure_revert(self, action_name: str, action_key: str) -> None:
+        self.failure_revert_action_names.add(action_name)
+        self.failure_revert_action_keys.add(action_key)
+        self.action_semantics[action_name] = "failure_revert_like"
 
     def dedupe_hypotheses(self, keep_last: int = 8) -> None:
         seen: set[str] = set()

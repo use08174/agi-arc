@@ -51,6 +51,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             )
             self._learn_from_transition(transition)
             self._learn_meta_action(transition)
+            self._learn_action_semantics(transition)
             if result.done:
                 self.last_episode_end_reason = "environment_done"
                 self.last_episode_final_status = result.frame.status.value
@@ -130,7 +131,7 @@ class GraphSearchAgent(ArcAgentRuntime):
     def _filter_useless_actions(self, observation: Observation, actions: list[Action]) -> list[Action]:
         filtered = []
         for action in actions:
-            if action.name in self.game_memory.reset_like_action_names or action.key in self.game_memory.reset_like_action_keys:
+            if action.name in self.game_memory.restart_like_action_names or action.key in self.game_memory.restart_like_action_keys:
                 continue
             if self.game_memory.world_model.is_unsafe_action(action):
                 continue
@@ -142,11 +143,32 @@ class GraphSearchAgent(ArcAgentRuntime):
     def _learn_meta_action(self, transition: Transition) -> None:
         if transition.won or transition.reward_delta > 0:
             return
-        if transition.to_state != getattr(self, "initial_state_key", None):
-            return
         if transition.from_state == transition.to_state:
             return
-        self.game_memory.remember_reset_like(transition.action.name, transition.action.key)
+        previous_state = self.recent_states[-2] if len(self.recent_states) >= 2 else None
+        if transition.terminal and not transition.won and transition.to_state in {
+            getattr(self, "initial_state_key", None),
+            previous_state,
+        }:
+            self.game_memory.remember_failure_revert(transition.action.name, transition.action.key)
+        elif previous_state is not None and transition.to_state == previous_state:
+            self.game_memory.remember_undo_like(transition.action.name, transition.action.key)
+        elif transition.to_state == getattr(self, "initial_state_key", None):
+            self.game_memory.remember_restart_like(transition.action.name, transition.action.key)
+
+    def _learn_action_semantics(self, transition: Transition) -> None:
+        previous_state = self.recent_states[-2] if len(self.recent_states) >= 2 else None
+        before_player = transition.notes.get("semantic_previous_player_pos")
+        after_player = transition.notes.get("semantic_player_pos")
+        move_vector = None
+        if isinstance(before_player, tuple) and isinstance(after_player, tuple):
+            move_vector = (int(after_player[0]) - int(before_player[0]), int(after_player[1]) - int(before_player[1]))
+        self.game_memory.learned_action_semantics.observe(
+            transition,
+            move_vector=move_vector,
+            returned_previous=previous_state is not None and transition.to_state == previous_state,
+            returned_initial=transition.to_state == getattr(self, "initial_state_key", None) and transition.from_state != transition.to_state,
+        )
 
     def _fallback_action(self, observation: Observation, actions: list[Action]) -> Action:
         for action in actions:

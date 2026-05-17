@@ -77,11 +77,17 @@ class LLMHookManager:
         world = game_memory.world_model
         for action in candidate_actions:
             profile = game_memory.semantic_profile(action.name, action.key)
+            learned_meaning = game_memory.learned_action_semantics.meaning_for(action.name)
+            learned_label, learned_confidence = learned_meaning.best_label
             successor = graph.seen_successor(observation.state_key, action)
             target = world.predicted_target(world.player_pos, action.name)
             flags = []
-            if action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys:
-                flags.append("RESET_LIKE")
+            if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
+                flags.append("RESTART_LIKE")
+            if action.name in game_memory.undo_like_action_names or action.key in game_memory.undo_like_action_keys:
+                flags.append("UNDO_LIKE")
+            if action.name in game_memory.failure_revert_action_names or action.key in game_memory.failure_revert_action_keys:
+                flags.append("FAILURE_REVERT_LIKE")
             if world.is_unsafe_action(action):
                 flags.append("UNSAFE_BY_WORLD_MODEL")
             if target is not None:
@@ -92,7 +98,10 @@ class LLMHookManager:
                 if self._click_is_display_like(point, world):
                     flags.append("DISPLAY_LIKE_CLICK")
             seen = "unseen-from-current-state" if successor is None else f"seen-successor={successor}"
-            candidate_action_evidence.append(f"{action.key}: {seen}; {'; '.join(flags)}; global_profile={self._format_profile(profile)}")
+            candidate_action_evidence.append(
+                f"{action.key}: {seen}; {'; '.join(flags)}; learned_label={learned_label}:{learned_confidence:.2f}; "
+                f"global_profile={self._format_profile(profile)}"
+            )
         subgoals = world.hypothesis_library.preferred_subgoals(world)
         if world.has_precondition_evidence() and (world.visible_item_cells or world.known_item_cells):
             precondition = {"type": "test_precondition_before_goal", "reason": "state-changing collectible or goal gate suspected"}
@@ -108,8 +117,11 @@ class LLMHookManager:
             recent_states=recent_states,
             known_promising_actions=sorted(game_memory.promising_action_keys or game_memory.promising_actions),
             known_dangerous_actions=sorted(game_memory.dangerous_action_keys),
-            known_reset_like_actions=sorted(game_memory.reset_like_action_keys or game_memory.reset_like_action_names),
+            known_restart_like_actions=sorted(game_memory.restart_like_action_keys or game_memory.restart_like_action_names),
+            known_undo_like_actions=sorted(game_memory.undo_like_action_keys or game_memory.undo_like_action_names),
+            known_failure_revert_actions=sorted(game_memory.failure_revert_action_keys or game_memory.failure_revert_action_names),
             candidate_action_evidence=candidate_action_evidence,
+            learned_action_semantics=game_memory.learned_action_semantics.summaries(),
             latest_transitions=latest_transitions,
             prior_hypotheses=game_memory.hypotheses,
             semantic_ascii_map=world.semantic_ascii_map or str(observation.notes.get("semantic_ascii_map", "")),

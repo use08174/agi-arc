@@ -23,12 +23,13 @@ class FrontierExplorer:
         world = game_memory.world_model
         ranked = []
         for index, action in enumerate(actions):
-            if action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys:
+            if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
             if world.is_unsafe_action(action):
                 continue
             successor = graph.seen_successor(observation.state_key, action)
             profile = game_memory.semantic_profile(action.name, action.key)
+            learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
             unseen_from_state = successor is None
             known_changed = action.key in game_memory.changed_action_keys or action.key in game_memory.promising_action_keys
             known_reward = profile.reward_total > 0
@@ -51,6 +52,7 @@ class FrontierExplorer:
             ranked.append(
                 (
                     terminal_loss,
+                    learned_label in {"restart_like", "hud_only"} and learned_confidence >= 0.6,
                     globally_noop and not unseen_from_state,
                     loops_recent,
                     back_edge,
@@ -59,6 +61,7 @@ class FrontierExplorer:
                     not known_reward,
                     not known_collectible,
                     not known_changed,
+                    learned_label == "noop" and learned_confidence >= 0.6,
                     not unseen_from_state,
                     graph.traversals_for(observation.state_key, action, successor) if successor is not None else 0,
                     graph.visits_for(successor) if successor is not None else 0,
@@ -89,13 +92,16 @@ class FrontierExplorer:
 
         def bucket(action: Action) -> tuple:
             unsafe = world.is_unsafe_action(action)
-            reset_like = action.name in game_memory.reset_like_action_names or action.key in game_memory.reset_like_action_keys
+            restart_like = action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys
+            learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
             successor = graph.seen_successor(observation.state_key, action)
             unseen = successor is None
             score = -score_by_key.get(action.key, 0.0)
             rank_index = index_by_key.get(action.key, 10**6)
-            if reset_like:
+            if restart_like:
                 return (10, rank_index, action.key)
+            if learned_label in {"restart_like", "hud_only"} and learned_confidence >= 0.6:
+                return (8, rank_index, action.key)
             if unsafe:
                 return (9, rank_index, action.key)
             if action.key in game_memory.promising_action_keys:

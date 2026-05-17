@@ -12,7 +12,8 @@ class PromptBuilder:
         lines = [
             "You are helping an ARC-AGI-3 agent. The symbolic planner owns final movement; you provide ranking and rule hypotheses.",
             "Use the semantic map and world model. Do not choose arbitrary unexplored actions.",
-            "Never prefer actions marked unsafe, deadly, blocked, HUD-only, feedback-only, noop-loop, terminal-loss, or RESET_LIKE.",
+            "Never prefer actions marked unsafe, deadly, blocked, HUD-only, feedback-only, noop-loop, terminal-loss, or RESTART_LIKE.",
+            "Treat UNDO_LIKE as a meta action: it may be useful for controlled experiments, but it is not forward progress by itself.",
             "Never prefer actions marked DISPLAY_LIKE_CLICK unless there is direct evidence that the display itself is interactive.",
             "Prefer actions that move along a safe path to items/goals/buttons, or click objects matching learned object rules.",
             "State key: " + context.observation.state_key,
@@ -25,6 +26,9 @@ class PromptBuilder:
         if context.world_model_summary:
             lines.append("World model summary:")
             lines.extend("- " + item for item in context.world_model_summary[:12])
+        if context.learned_action_semantics:
+            lines.append("Learned action semantics from direct experiments:")
+            lines.extend("- " + item for item in context.learned_action_semantics[:8])
         if context.recent_scene_events:
             lines.append("Recent scene events:")
             lines.extend("- " + item for item in context.recent_scene_events[-10:])
@@ -44,7 +48,9 @@ class PromptBuilder:
             [
                 f"Known promising action keys: {', '.join(context.known_promising_actions) or 'none'}",
                 f"Known dangerous action keys: {', '.join(context.known_dangerous_actions) or 'none'}",
-                f"Known reset-like/meta action keys: {', '.join(context.known_reset_like_actions) or 'none'}",
+                f"Known restart-like action keys: {', '.join(context.known_restart_like_actions) or 'none'}",
+                f"Known undo-like action keys: {', '.join(context.known_undo_like_actions) or 'none'}",
+                f"Known failure-revert action keys: {', '.join(context.known_failure_revert_actions) or 'none'}",
                 f"Recent states: {', '.join(context.recent_states[-8:]) or 'none'}",
                 "Candidate actions:",
             ]

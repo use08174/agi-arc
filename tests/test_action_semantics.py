@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from arc_agi3.core.types import Action, Frame, GameStatus
+from arc_agi3.core.types import Action, Frame, GameStatus, Transition
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.perception.hasher import StateHasher
 from arc_agi3.perception.map_parser import MapParser
@@ -136,6 +136,29 @@ class ActionSemanticsTest(unittest.TestCase):
             for item in semantic.items
         ]
         self.assertNotIn((1, 13), bottom_item_centers)
+
+    def test_learned_action_semantics_infer_move_and_panel_change(self) -> None:
+        memory = GameMemory()
+        move = Transition(
+            from_state="s0",
+            action=Action(name="ACTION1"),
+            to_state="s1",
+            changed=True,
+            notes={"semantic_player_moved": True},
+        )
+        panel = Transition(
+            from_state="s1",
+            action=Action(name="ACTION7"),
+            to_state="s2",
+            changed=True,
+            notes={"anchor_patch_changes": ["bottom_left"]},
+        )
+
+        memory.learned_action_semantics.observe(move, move_vector=(0, -1), returned_previous=False, returned_initial=False)
+        memory.learned_action_semantics.observe(panel, move_vector=None, returned_previous=False, returned_initial=False)
+
+        self.assertEqual(memory.learned_action_semantics.meaning_for("ACTION1").best_label[0], "move")
+        self.assertEqual(memory.learned_action_semantics.meaning_for("ACTION7").best_label[0], "panel_or_mode_change")
 
 
 if __name__ == "__main__":
