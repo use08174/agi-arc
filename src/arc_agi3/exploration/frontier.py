@@ -12,43 +12,62 @@ class FrontierExplorer:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
 
+    # src/arc_agi3/exploration/frontier.py
+
     def choose_action(
         self,
-        observation: Observation,
-        actions: list[Action],
-        graph: StateGraph,
-        game_memory: GameMemory,
-        recent_states: set[str],
-    ) -> Action | None:
-        for action in actions:
-            if action.key in game_memory.dangerous_action_keys:
-                continue
-            if graph.seen_successor(observation.state_key, action) is None:
-                return action
-
+        observation,
+        actions,
+        graph,
+        game_memory,
+        recent_states,
+    ):
         ranked = []
+
         for action in actions:
             if action.key in game_memory.dangerous_action_keys:
                 continue
-            if graph.action_is_probably_useless(observation.state_key, action):
-                continue
+
             successor = graph.seen_successor(observation.state_key, action)
-            if successor is None:
-                return action
+            profile = game_memory.semantic_profile(action.name, action.key)
+
+            unseen_from_state = successor is None
+            known_changed = action.key in game_memory.changed_action_keys
+            known_reward = profile.reward_total > 0
+            known_collectible = profile.collectible_progress > 0
+            globally_noop = profile.uses >= 2 and profile.changed_uses == 0
+            terminal_loss = profile.terminal_losses > 0
+
+            loops_recent = successor in recent_states if successor is not None else False
+            back_edge = (
+                graph.is_back_edge(observation.state_key, successor)
+                if successor is not None
+                else False
+            )
+
             ranked.append(
                 (
-                    action.key in game_memory.dangerous_action_keys,
-                    action.name not in game_memory.promising_actions,
-                    successor in recent_states,
-                    graph.is_back_edge(observation.state_key, successor),
-                    graph.traversals_for(observation.state_key, action, successor),
-                    graph.visits_for(successor),
+                    terminal_loss,
+                    globally_noop and not unseen_from_state,
+                    loops_recent,
+                    back_edge,
+                    not known_reward,
+                    not known_collectible,
+                    not known_changed,
+                    not unseen_from_state,
+                    graph.traversals_for(observation.state_key, action, successor)
+                    if successor is not None
+                    else 0,
+                    graph.visits_for(successor) if successor is not None else 0,
+                    profile.noop_uses,
+                    action.key,
                     action,
                 )
             )
+
         if ranked:
-            ranked.sort(key=lambda item: (item[0], item[1], item[2], item[3], item[4], item[5], item[6].key))
-            return ranked[0][6]
+            ranked.sort(key=lambda item: item[:-1])
+            return ranked[0][-1]
 
         return None
 
