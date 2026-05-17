@@ -91,6 +91,28 @@ class LLMRankingTest(unittest.TestCase):
         )
         self.assertEqual(reordered[0].name, "ACTION3")
 
+    def test_unseen_actions_beat_promising_seen_actions_during_exploration(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig(), llm_config=LLMConfig(enabled=True))
+        observation = Observation(state_key="s0", frame=None, changed=True)  # type: ignore[arg-type]
+        actions = [Action(name="ACTION1"), Action(name="ACTION2")]
+        graph = StateGraph()
+        graph.touch("s0")
+        graph.nodes["s0"].outgoing["ACTION1"] = "s1"
+        memory = GameMemory()
+        memory.promising_action_keys.add("ACTION1")
+        ranked = [RankedAction(action=actions[0], score=1.0, reason="prefer seen promising action")]
+
+        reordered = agent.explorer.reorder_with_rankings(
+            observation=observation,
+            actions=actions,
+            ranked_actions=ranked,
+            graph=graph,
+            game_memory=memory,
+            force_exploration=True,
+        )
+
+        self.assertEqual(reordered[0].name, "ACTION2")
+
 
 if __name__ == "__main__":
     unittest.main()

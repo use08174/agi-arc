@@ -31,11 +31,13 @@ class ArcAgentRuntime:
         self.recent_states: deque[str] = deque(
             maxlen=self.config.budget.recent_state_window
         )
+        self.steps_since_new_state = 0
 
     def reset_level(self) -> None:
         self.graph = StateGraph()
         self.previous_observation = None
         self.recent_states = deque(maxlen=self.config.budget.recent_state_window)
+        self.steps_since_new_state = 0
         self.llm.reset_episode()
 
     def close(self) -> None:

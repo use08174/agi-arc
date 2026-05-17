@@ -14,6 +14,7 @@ class PromptBuilder:
             "Use the semantic map and world model. Do not choose arbitrary unexplored actions.",
             "Never prefer actions marked unsafe, deadly, blocked, HUD-only, feedback-only, noop-loop, terminal-loss, or RESTART_LIKE.",
             "Treat UNDO_LIKE as a meta action, not a normal candidate for forward progress.",
+            "If recent behavior is looping without reward or new states, prefer a concrete unseen test over repeating a merely safe route.",
             "Never prefer actions marked DISPLAY_LIKE_CLICK unless there is direct evidence that the display itself is interactive.",
             "Prefer actions that move along a safe path to items/goals/buttons, or click objects matching learned object rules.",
             "State key: " + context.observation.state_key,

@@ -31,6 +31,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             before_notes = dict(observation.notes)
             result = env.step(action)
             next_observation = self.hasher.observe(result.frame, previous=observation.frame)
+            discovered_new_state = next_observation.state_key not in self.graph.nodes
             self.game_memory.world_model.update_from_observation(next_observation.notes)
             transition = Transition(
                 from_state=observation.state_key,
@@ -52,6 +53,10 @@ class GraphSearchAgent(ArcAgentRuntime):
             self._learn_from_transition(transition)
             self._learn_meta_action(transition)
             self._learn_action_semantics(transition)
+            if discovered_new_state:
+                self.steps_since_new_state = 0
+            else:
+                self.steps_since_new_state += 1
             if result.done:
                 self.last_episode_end_reason = "environment_done"
                 self.last_episode_final_status = result.frame.status.value
@@ -66,6 +71,7 @@ class GraphSearchAgent(ArcAgentRuntime):
 
     def _choose_action(self, step_idx: int, observation: Observation, actions: list[Action]) -> Action:
         actions = self._filter_useless_actions(observation, actions)
+        force_exploration = self._should_force_exploration(step_idx, observation)
         ranked_actions = self.llm.rank_actions(
             observation=observation,
             candidate_actions=actions,
@@ -80,9 +86,9 @@ class GraphSearchAgent(ArcAgentRuntime):
             ranked_actions=ranked_actions,
             graph=self.graph,
             game_memory=self.game_memory,
-            force_exploration=step_idx < self.config.budget.explore_phase_steps,
+            force_exploration=force_exploration,
         )
-        if step_idx >= self.config.budget.explore_phase_steps:
+        if not force_exploration:
             plan = self.planner.build_plan(
                 observation=observation,
                 actions=actions,
@@ -98,10 +104,20 @@ class GraphSearchAgent(ArcAgentRuntime):
             graph=self.graph,
             game_memory=self.game_memory,
             recent_states=set(self.recent_states),
+            force_exploration=force_exploration,
         )
         if action is None:
             return self._fallback_action(observation, actions)
         return action
+
+    def _should_force_exploration(self, step_idx: int, observation: Observation) -> bool:
+        if step_idx < self.config.budget.explore_phase_steps:
+            return True
+        if self.steps_since_new_state >= self.config.budget.novelty_patience_steps:
+            return True
+        if self.graph.visits_for(observation.state_key) >= self.config.budget.revisit_limit:
+            return True
+        return False
 
     def _learn_from_transition(self, transition: Transition) -> None:
         notes = transition.notes

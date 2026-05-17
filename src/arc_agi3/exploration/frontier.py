@@ -19,6 +19,7 @@ class FrontierExplorer:
         graph: StateGraph,
         game_memory: GameMemory,
         recent_states: set[str],
+        force_exploration: bool = False,
     ) -> Action | None:
         world = game_memory.world_model
         ranked = []
@@ -55,6 +56,7 @@ class FrontierExplorer:
                 (
                     terminal_loss,
                     learned_label in {"restart_like", "undo_like", "hud_only"} and learned_confidence >= 0.6,
+                    not unseen_from_state if force_exploration else False,
                     globally_noop and not unseen_from_state,
                     loops_recent,
                     back_edge,
@@ -109,9 +111,9 @@ class FrontierExplorer:
                 return (8, rank_index, action.key)
             if unsafe:
                 return (9, rank_index, action.key)
-            if action.key in game_memory.promising_action_keys:
-                return (0, score, rank_index, action.key)
             if unseen and force_exploration:
+                return (0, score, rank_index, action.key)
+            if action.key in game_memory.promising_action_keys:
                 return (1, score, rank_index, action.key)
             if unseen:
                 return (2, score, rank_index, action.key)

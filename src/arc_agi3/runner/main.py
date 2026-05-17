@@ -27,6 +27,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recordings-dir", default="recordings")
     parser.add_argument("--max-steps", type=int, default=128)
     parser.add_argument("--explore-steps", type=int, default=24)
+    parser.add_argument("--novelty-patience-steps", type=int, default=6)
+    parser.add_argument("--revisit-limit", type=int, default=3)
     parser.add_argument("--list-games", action="store_true")
     parser.add_argument("--save-recording", action="store_true")
     parser.add_argument("--llm-enabled", action="store_true")
@@ -55,6 +57,8 @@ def main() -> None:
     agent_config = AgentConfig()
     agent_config.budget.max_steps_per_level = args.max_steps
     agent_config.budget.explore_phase_steps = args.explore_steps
+    agent_config.budget.novelty_patience_steps = args.novelty_patience_steps
+    agent_config.budget.revisit_limit = args.revisit_limit
     llm_config = LLMConfig(
         enabled=args.llm_enabled,
         provider=args.llm_provider,

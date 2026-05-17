@@ -11,9 +11,10 @@ class ClickExpansionConfig:
 @dataclass(slots=True)
 class BudgetConfig:
     max_steps_per_level: int = 128
-    explore_phase_steps: int = 8
+    explore_phase_steps: int = 24
     revisit_limit: int = 3
     recent_state_window: int = 12
+    novelty_patience_steps: int = 6
 
 
 @dataclass(slots=True)
@@ -57,4 +58,3 @@ class RuntimeConfig:
     recordings_dir: Path = Path("recordings")
     save_recording: bool = False
     include_frame_data: bool = True
-
