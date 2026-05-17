@@ -1,0 +1,7 @@
+{
+  "game_id": "ms00",
+  "title": "Mini Seek",
+  "default_fps": 5,
+  "tags": ["starter", "offline-demo"],
+  "class_name": "Ms00"
+}
