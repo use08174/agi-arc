@@ -2,13 +2,63 @@ from __future__ import annotations
 
 from arc_agi3.agents.base import ArcAgentRuntime
 from arc_agi3.agents.env_understanding_agent import EnvUnderstandingAgent
-from arc_agi3.core.types import Action, DecisionTrace, Observation, Transition
+from arc_agi3.core.types import Action, DecisionTrace, Frame, GameStatus, Observation, Transition
 from arc_agi3.envs.base import ArcEnvironment
 from arc_agi3.planning.safety_shield import SafetyShield
 
 
 class GraphSearchAgent(ArcAgentRuntime):
     """Explore-first agent scaffold with semantic world-model updates."""
+
+    def begin_external_episode(self, frame: Frame) -> None:
+        self.last_episode_end_reason = "not_started"
+        self.last_episode_final_status = "UNKNOWN"
+        self.last_episode_final_info = {}
+        self.reset_level()
+        self.safety_shield = SafetyShield()
+        self.understanding_agent = EnvUnderstandingAgent()
+        observation = self.hasher.observe(frame)
+        self.game_memory.world_model.update_from_observation(observation.notes)
+        self.graph.touch(observation.state_key, terminal=False)
+        self.initial_state_key = observation.state_key
+        self.recent_states.append(observation.state_key)
+        self._external_observation = observation
+        self._external_pending_action: Action | None = None
+        self._external_step_idx = 0
+
+    def choose_external_action(self, frame: Frame, actions: list[Action]) -> Action:
+        if getattr(self, "_external_observation", None) is None:
+            self.begin_external_episode(frame)
+        elif getattr(self, "_external_pending_action", None) is not None:
+            self.observe_external_frame(frame)
+
+        observation = self._external_observation
+        action = self._choose_action(self._external_step_idx, observation, actions)
+        action = self.safety_shield.validate_or_replace(action, observation, actions, self.game_memory)
+        self._external_pending_action = action
+        self._external_step_idx += 1
+        return action
+
+    def observe_external_frame(self, frame: Frame) -> None:
+        observation = getattr(self, "_external_observation", None)
+        action = getattr(self, "_external_pending_action", None)
+        if observation is None or action is None:
+            return
+        previous_levels = int(observation.frame.info.get("levels_completed", 0) or 0)
+        next_levels = int(frame.info.get("levels_completed", 0) or 0)
+        reward_delta = float(next_levels - previous_levels)
+        done = frame.status in {GameStatus.WIN, GameStatus.GAME_OVER}
+        won = frame.status == GameStatus.WIN
+        next_observation = self._integrate_transition(
+            observation=observation,
+            action=action,
+            frame=frame,
+            reward_delta=reward_delta,
+            done=done,
+            won=won,
+        )
+        self._external_observation = next_observation
+        self._external_pending_action = None
 
     def run_episode(self, env: ArcEnvironment) -> tuple[bool, int]:
         self.last_episode_end_reason = "not_started"
@@ -28,68 +78,87 @@ class GraphSearchAgent(ArcAgentRuntime):
             actions = env.valid_actions()
             action = self._choose_action(step_idx, observation, actions)
             action = self.safety_shield.validate_or_replace(action, observation, actions, self.game_memory)
-            before_notes = dict(observation.notes)
             result = env.step(action)
-            next_observation = self.hasher.observe(result.frame, previous=observation.frame)
-            discovered_new_state = next_observation.state_key not in self.graph.nodes
-            self.game_memory.world_model.update_from_observation(next_observation.notes)
-            transition = Transition(
-                from_state=observation.state_key,
+            next_observation = self._integrate_transition(
+                observation=observation,
                 action=action,
-                to_state=next_observation.state_key,
-                changed=next_observation.changed,
+                frame=result.frame,
                 reward_delta=result.reward_delta,
-                terminal=result.done,
+                done=result.done,
                 won=result.won,
-                notes=next_observation.notes,
             )
-            self.graph.record(transition)
-            self.game_memory.world_model.learn_transition(
-                action=action,
-                before_notes=before_notes,
-                after_notes=next_observation.notes,
-                terminal_loss=result.done and not result.won,
-            )
-            experiment_outcome = self.game_memory.experiments.observe_transition(
-                transition=transition,
-                after_notes=next_observation.notes,
-                world=self.game_memory.world_model,
-            )
-            if experiment_outcome is not None:
-                self.game_memory.world_model.hypothesis_library.apply_experiment_result(
-                    kind=experiment_outcome.proposal.kind,
-                    status=experiment_outcome.status,
-                    evidence=experiment_outcome.evidence,
-                )
-            self._learn_from_transition(transition)
-            self._learn_meta_action(transition)
-            self._learn_action_semantics(transition)
-            self.recent_actions.append(action.name)
-            if discovered_new_state:
-                self.steps_since_new_state = 0
-            else:
-                self.steps_since_new_state += 1
-            semantic_progress = bool(
-                result.reward_delta > 0
-                or next_observation.notes.get("collectible_progress", False)
-                or next_observation.notes.get("anchor_patch_changes", [])
-                or (experiment_outcome is not None and experiment_outcome.status == "confirmed")
-            )
-            if semantic_progress:
-                self.steps_since_semantic_progress = 0
-            else:
-                self.steps_since_semantic_progress += 1
             if result.done:
                 self.last_episode_end_reason = "environment_done"
                 self.last_episode_final_status = result.frame.status.value
                 self.last_episode_final_info = dict(result.frame.info)
                 return result.won, step_idx + 1
             observation = next_observation
-            self.recent_states.append(observation.state_key)
         self.last_episode_end_reason = "step_budget_exhausted"
         self.last_episode_final_status = observation.frame.status.value
         self.last_episode_final_info = dict(observation.frame.info)
         return False, self.config.budget.max_steps_per_level
+
+    def _integrate_transition(
+        self,
+        observation: Observation,
+        action: Action,
+        frame: Frame,
+        reward_delta: float,
+        done: bool,
+        won: bool,
+    ) -> Observation:
+        before_notes = dict(observation.notes)
+        next_observation = self.hasher.observe(frame, previous=observation.frame)
+        discovered_new_state = next_observation.state_key not in self.graph.nodes
+        self.game_memory.world_model.update_from_observation(next_observation.notes)
+        transition = Transition(
+            from_state=observation.state_key,
+            action=action,
+            to_state=next_observation.state_key,
+            changed=next_observation.changed,
+            reward_delta=reward_delta,
+            terminal=done,
+            won=won,
+            notes=next_observation.notes,
+        )
+        self.graph.record(transition)
+        self.game_memory.world_model.learn_transition(
+            action=action,
+            before_notes=before_notes,
+            after_notes=next_observation.notes,
+            terminal_loss=done and not won,
+        )
+        experiment_outcome = self.game_memory.experiments.observe_transition(
+            transition=transition,
+            after_notes=next_observation.notes,
+            world=self.game_memory.world_model,
+        )
+        if experiment_outcome is not None:
+            self.game_memory.world_model.hypothesis_library.apply_experiment_result(
+                kind=experiment_outcome.proposal.kind,
+                status=experiment_outcome.status,
+                evidence=experiment_outcome.evidence,
+            )
+        self._learn_from_transition(transition)
+        self._learn_meta_action(transition)
+        self._learn_action_semantics(transition)
+        self.recent_actions.append(action.name)
+        if discovered_new_state:
+            self.steps_since_new_state = 0
+        else:
+            self.steps_since_new_state += 1
+        semantic_progress = bool(
+            reward_delta > 0
+            or next_observation.notes.get("collectible_progress", False)
+            or next_observation.notes.get("anchor_patch_changes", [])
+            or (experiment_outcome is not None and experiment_outcome.status == "confirmed")
+        )
+        if semantic_progress:
+            self.steps_since_semantic_progress = 0
+        else:
+            self.steps_since_semantic_progress += 1
+        self.recent_states.append(next_observation.state_key)
+        return next_observation
 
     def _choose_action(self, step_idx: int, observation: Observation, actions: list[Action]) -> Action:
         actions = self._filter_useless_actions(observation, actions)

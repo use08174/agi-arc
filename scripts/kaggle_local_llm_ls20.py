@@ -59,11 +59,37 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    bootstrap()
-    from arc_agi3.runner.main import main as runner_main
-
+    repo = bootstrap()
     args = parse_args()
     model_path = recommended_model_path(args.model_short_name)
+    if args.mode == "offline":
+        from arc_agi3.runner.offline_eval import OfflineEvalConfig, run_offline_evaluation
+
+        os.environ["ARC_AGI3_MAX_ACTIONS"] = str(args.max_steps)
+        os.environ["ARC_AGI3_MAX_STEPS"] = str(args.max_steps)
+        os.environ["ARC_AGI3_EXPLORE_STEPS"] = str(args.explore_steps)
+        os.environ["ARC_AGI3_LLM_ENABLED"] = "1"
+        os.environ["ARC_AGI3_LLM_PROVIDER"] = "transformers_local"
+        os.environ["ARC_AGI3_LLM_MODEL_PATH"] = model_path
+        os.environ["ARC_AGI3_LLM_DEVICE"] = args.llm_device
+        os.environ["ARC_AGI3_LLM_START_STEP"] = str(args.llm_start_step)
+        os.environ["ARC_AGI3_LLM_STEP_INTERVAL"] = str(args.llm_step_interval)
+        os.environ["ARC_AGI3_LLM_MAX_CALLS"] = str(args.llm_max_calls)
+        os.environ["ARC_AGI3_LLM_MAX_NEW_TOKENS"] = str(args.llm_max_new_tokens)
+        os.environ["ARC_AGI3_LLM_SHOW_TRACE"] = "1" if args.llm_show_trace else "0"
+        os.environ["ARC_AGI3_LLM_SHOW_PROMPT"] = "1" if args.llm_show_prompt else "0"
+        run_offline_evaluation(
+            OfflineEvalConfig(
+                repo_root=repo,
+                agent_src=repo / "scripts" / "kaggle_offline_eval_agent.py",
+                run_game=args.game_id,
+                description=f"agi-arc-offline-{args.game_id}",
+            )
+        )
+        return
+
+    from arc_agi3.runner.main import main as runner_main
+
     sys.argv = [
         "arc_agi3.runner.main",
         "--backend",

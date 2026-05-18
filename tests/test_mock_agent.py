@@ -30,6 +30,17 @@ class MockAgentTest(unittest.TestCase):
 
         self.assertEqual([action.key for action in filtered], [useful_action.key])
 
+    def test_external_stepwise_mode_learns_from_next_frame(self) -> None:
+        agent = GraphSearchAgent()
+        start = Frame(grid=((1, 0),), status=GameStatus.IN_PROGRESS, info={"levels_completed": 0})
+        next_frame = Frame(grid=((0, 1),), status=GameStatus.IN_PROGRESS, info={"levels_completed": 0})
+
+        first_action = agent.choose_external_action(start, [Action(name="ACTION1")])
+        agent.observe_external_frame(next_frame)
+
+        self.assertEqual(first_action.name, "ACTION1")
+        self.assertGreaterEqual(len(agent.graph.transitions), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

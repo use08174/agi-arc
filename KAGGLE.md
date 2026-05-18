@@ -136,6 +136,58 @@ If internet is off, use the local demo game:
 
 This verifies the architecture only. It does not create official ARC scorecards or replays.
 
+## Offline Evaluation Notebook
+
+For the notebook `arc3-agent-evaluation-and-recording-viewer.ipynb`, use the official-interface
+adapter in this repo instead of the random baseline agent:
+
+```python
+import os
+from pathlib import Path
+
+AGI_ARC_REPO = Path("/kaggle/working/agi-arc")
+os.environ["AGI_ARC_REPO"] = str(AGI_ARC_REPO)
+
+result = run_arc(
+    agent_src=AGI_ARC_REPO / "scripts" / "kaggle_offline_eval_agent.py",
+    agent_class_name="MyAgent",
+    agent_cli_name="myagent",
+    run_game="all",
+    description="agi-arc-offline-v1",
+)
+```
+
+This keeps the notebook's official `main.py` execution path, while the adapter translates
+frame-by-frame `choose_action(...)` calls into this repo's graph-search runtime.
+
+Optional environment variables for the adapter:
+
+```python
+os.environ["ARC_AGI3_MAX_STEPS"] = "128"
+os.environ["ARC_AGI3_EXPLORE_STEPS"] = "24"
+os.environ["ARC_AGI3_LLM_ENABLED"] = "1"
+os.environ["ARC_AGI3_LLM_PROVIDER"] = "transformers_local"
+os.environ["ARC_AGI3_LLM_MODEL_PATH"] = "/kaggle/input/models/qwen-lm/qwen2.5-coder/transformers/3b-instruct/1"
+```
+
+If you prefer the CLI instead of the notebook, the local-LLM script now selects the
+official offline evaluator automatically when `--mode offline` is used:
+
+```python
+!python /kaggle/working/agi-arc/scripts/kaggle_local_llm_ls20.py \
+    --mode offline \
+    --game-id bp35 \
+    --model-short-name /kaggle/input/models/qwen-lm/qwen2.5-coder/transformers/3b-instruct/1 \
+    --max-steps 50 \
+    --explore-steps 5 \
+    --llm-start-step 8 \
+    --llm-step-interval 8 \
+    --llm-max-calls 100 \
+    --llm-show-trace
+```
+
+Use `--game-id all` to evaluate every public offline environment in `environment_files`.
+
 ## If You Need `arc-agi` In Internet-Off Mode
 
 You need to upload wheel files as a Kaggle Dataset first, then install from that dataset.
