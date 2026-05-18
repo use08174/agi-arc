@@ -36,11 +36,11 @@ class TransformersLocalProvider:
 
     def analyze(self, context: LLMContext) -> LLMDecisionBundle:
         prompt = self._build_prompt(context)
-        response_text = self._generate(prompt)
+        response_text = self._generate(prompt, thinking_mode=self.config.thinking_mode)
         bundle = self._parse_response(response_text, context.candidate_actions, context.available_experiments)
         if not bundle.ranked_actions and bundle.next_test is None:
             repair_prompt = self._build_repair_prompt(prompt, response_text)
-            repair_response = self._generate(repair_prompt)
+            repair_response = self._generate(repair_prompt, thinking_mode="off")
             repaired = self._parse_response(repair_response, context.candidate_actions, context.available_experiments)
             if repaired.ranked_actions or repaired.next_test is not None:
                 repaired.raw_response = response_text + "\n\n[repair]\n" + repair_response
@@ -100,16 +100,28 @@ Rules:
 - Penalize unsafe/deadly/blocked/HUD-only/noop/loop actions.
 - Prefer safe path progress or object-rule clicks.
 - Keep the JSON short. Do not include hypotheses unless explicitly requested.
-- Do not output <think>, reasoning, analysis, markdown fences, or any prose outside the JSON object.
+- If thinking is enabled, think briefly, then output one final JSON object.
+- Do not output markdown fences or any prose outside the final JSON object.
 """
         return base + "\n" + output_format
 
-    def _generate(self, prompt: str) -> str:
+    def _generate(self, prompt: str, thinking_mode: str | None = None) -> str:
         loaded = self._load()
+        mode = thinking_mode or self.config.thinking_mode
+        thinking_enabled = mode in {"brief", "full"}
+        if mode == "brief":
+            prompt = (
+                prompt
+                + "\n\nThink briefly before answering: use at most 6 short sentences or 160 words inside the thinking block, "
+                + "then finish with the final JSON object."
+            )
         messages = [
             {
                 "role": "system",
-                "content": "You are an ARC-AGI-3 ranker. Return one short JSON object only. No thinking text. No explanation.",
+                "content": (
+                    "You are an ARC-AGI-3 ranker. "
+                    "Use careful reasoning, but always finish with one short JSON object."
+                ),
             },
             {"role": "user", "content": prompt},
         ]
@@ -119,7 +131,7 @@ Rules:
                     messages,
                     tokenize=False,
                     add_generation_prompt=True,
-                    enable_thinking=False,
+                    enable_thinking=thinking_enabled,
                 )
             except TypeError:
                 text = loaded.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -131,10 +143,11 @@ Rules:
         elif torch is not None and hasattr(loaded.model, "device"):
             model_inputs = model_inputs.to(loaded.model.device)
         generation_kwargs = {
-            "max_new_tokens": self.config.max_new_tokens,
-            "do_sample": self.config.temperature > 0,
-            "temperature": self.config.temperature if self.config.temperature > 0 else None,
-            "top_p": self.config.top_p,
+            "max_new_tokens": self.config.thinking_max_new_tokens if thinking_enabled else self.config.max_new_tokens,
+            "do_sample": thinking_enabled or self.config.temperature > 0,
+            "temperature": 0.6 if thinking_enabled and self.config.temperature <= 0 else (self.config.temperature if self.config.temperature > 0 else None),
+            "top_p": 0.95 if thinking_enabled else self.config.top_p,
+            "top_k": 20 if thinking_enabled else None,
             "pad_token_id": loaded.tokenizer.pad_token_id if loaded.tokenizer.pad_token_id is not None else loaded.tokenizer.eos_token_id,
             "eos_token_id": loaded.tokenizer.eos_token_id,
         }
@@ -277,8 +290,8 @@ Rules:
         compact_invalid = invalid_response.strip().replace("\n", " ")[:320]
         return (
             original_prompt
-            + "\n\nYour previous answer was invalid because it was not one complete JSON object.\n"
-            + "Return only one minified JSON object now. No <think>. No prose. No markdown.\n"
+            + "\n\nUse the previous reasoning only as context. Your previous answer was invalid because it was not one complete JSON object.\n"
+            + "Do not think again. Return only one minified JSON object now. No <think>. No prose. No markdown.\n"
             + f"Invalid previous answer prefix: {compact_invalid}"
         )
 

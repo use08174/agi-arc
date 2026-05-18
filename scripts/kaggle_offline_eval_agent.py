@@ -56,6 +56,8 @@ class MyAgent(Agent):
             step_interval=int(os.getenv("ARC_AGI3_LLM_STEP_INTERVAL", "8")),
             max_calls_per_episode=int(os.getenv("ARC_AGI3_LLM_MAX_CALLS", "12")),
             max_new_tokens=int(os.getenv("ARC_AGI3_LLM_MAX_NEW_TOKENS", "256")),
+            thinking_mode=os.getenv("ARC_AGI3_LLM_THINKING_MODE", "brief"),
+            thinking_max_new_tokens=int(os.getenv("ARC_AGI3_LLM_THINKING_MAX_NEW_TOKENS", "512")),
             trace_enabled=os.getenv("ARC_AGI3_LLM_SHOW_TRACE", "0") == "1",
             trace_print_prompt=os.getenv("ARC_AGI3_LLM_SHOW_PROMPT", "0") == "1",
         )

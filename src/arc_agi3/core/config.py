@@ -38,6 +38,8 @@ class LLMConfig:
     max_ranked_actions: int = 3
     include_hypotheses: bool = False
     max_new_tokens: int = 256
+    thinking_mode: str = "brief"
+    thinking_max_new_tokens: int = 512
     temperature: float = 0.0
     top_p: float = 1.0
     start_step: int = 1

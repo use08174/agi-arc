@@ -114,6 +114,14 @@ class LLMRankingTest(unittest.TestCase):
 
         self.assertEqual(bundle.ranked_actions[0].action.name, "ACTION4")
 
+    def test_brief_thinking_uses_larger_generation_budget(self) -> None:
+        provider = TransformersLocalProvider(
+            LLMConfig(enabled=True, max_new_tokens=128, thinking_mode="brief", thinking_max_new_tokens=512)
+        )
+
+        self.assertEqual(provider.config.thinking_max_new_tokens, 512)
+        self.assertEqual(provider.config.thinking_mode, "brief")
+
     def test_transformers_provider_normalizes_loose_coordinate_action_keys(self) -> None:
         provider = TransformersLocalProvider(LLMConfig(enabled=True))
         action = Action(name="ACTION6", payload={"x": 1, "y": 4})

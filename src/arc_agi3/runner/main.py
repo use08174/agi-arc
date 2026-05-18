@@ -46,6 +46,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-step-interval", type=int, default=8)
     parser.add_argument("--llm-max-calls", type=int, default=12)
     parser.add_argument("--llm-max-new-tokens", type=int, default=256)
+    parser.add_argument(
+        "--llm-thinking-mode",
+        choices=["off", "brief", "full"],
+        default="brief",
+    )
+    parser.add_argument("--llm-thinking-max-new-tokens", type=int, default=512)
     parser.add_argument("--llm-show-trace", action="store_true")
     parser.add_argument("--llm-show-prompt", action="store_true")
     return parser.parse_args()
@@ -71,6 +77,8 @@ def main() -> None:
         step_interval=args.llm_step_interval,
         max_calls_per_episode=args.llm_max_calls,
         max_new_tokens=args.llm_max_new_tokens,
+        thinking_mode=args.llm_thinking_mode,
+        thinking_max_new_tokens=args.llm_thinking_max_new_tokens,
         trace_enabled=args.llm_show_trace,
         trace_print_prompt=args.llm_show_prompt,
     )

@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-step-interval", type=int, default=8)
     parser.add_argument("--llm-max-calls", type=int, default=12)
     parser.add_argument("--llm-max-new-tokens", type=int, default=192)
+    parser.add_argument(
+        "--llm-thinking-mode",
+        choices=["off", "brief", "full"],
+        default="brief",
+    )
+    parser.add_argument("--llm-thinking-max-new-tokens", type=int, default=512)
     parser.add_argument("--llm-device", default="auto")
     parser.add_argument("--llm-show-trace", action="store_true")
     parser.add_argument("--llm-show-prompt", action="store_true")
@@ -76,6 +82,8 @@ def main() -> None:
         os.environ["ARC_AGI3_LLM_STEP_INTERVAL"] = str(args.llm_step_interval)
         os.environ["ARC_AGI3_LLM_MAX_CALLS"] = str(args.llm_max_calls)
         os.environ["ARC_AGI3_LLM_MAX_NEW_TOKENS"] = str(args.llm_max_new_tokens)
+        os.environ["ARC_AGI3_LLM_THINKING_MODE"] = args.llm_thinking_mode
+        os.environ["ARC_AGI3_LLM_THINKING_MAX_NEW_TOKENS"] = str(args.llm_thinking_max_new_tokens)
         os.environ["ARC_AGI3_LLM_SHOW_TRACE"] = "1" if args.llm_show_trace else "0"
         os.environ["ARC_AGI3_LLM_SHOW_PROMPT"] = "1" if args.llm_show_prompt else "0"
         run_offline_evaluation(
@@ -117,6 +125,10 @@ def main() -> None:
         str(args.llm_max_calls),
         "--llm-max-new-tokens",
         str(args.llm_max_new_tokens),
+        "--llm-thinking-mode",
+        args.llm_thinking_mode,
+        "--llm-thinking-max-new-tokens",
+        str(args.llm_thinking_max_new_tokens),
     ]
     if args.llm_show_trace:
         sys.argv.append("--llm-show-trace")
