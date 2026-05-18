@@ -55,8 +55,9 @@ class OfficialAgentPolicy:
 
     def _available_actions(self, latest_frame: FrameData, frame: Frame) -> list[Action]:
         names = [
-            getattr(action, "name", str(action))
+            normalized
             for action in list(getattr(latest_frame, "available_actions", []) or [])
+            if (normalized := normalize_action_name(action)) is not None
         ]
         if not names:
             names = [action.name for action in GameAction if action is not GameAction.RESET]
@@ -96,3 +97,22 @@ class OfficialAgentPolicy:
         if action.payload:
             tool_action.set_data(dict(action.payload))
         return tool_action
+
+
+def normalize_action_name(action: Any) -> str | None:
+    """Normalize official action encodings into internal ACTION* names."""
+    name = getattr(action, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    if isinstance(action, int):
+        return "RESET" if action == 0 else f"ACTION{action}"
+    text = str(action).strip()
+    if not text:
+        return None
+    if text.isdigit():
+        value = int(text)
+        return "RESET" if value == 0 else f"ACTION{value}"
+    upper = text.upper()
+    if upper == "RESET" or upper.startswith("ACTION"):
+        return upper
+    return None
