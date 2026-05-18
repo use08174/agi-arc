@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 
 from arc_agi3.core.config import LLMConfig
-from arc_agi3.core.types import Action, LLMDecisionTrace, Observation, RankedAction, RuleHypothesis
+from arc_agi3.core.types import Action, ExperimentProposal, LLMDecisionTrace, Observation, RankedAction, RuleHypothesis
 from arc_agi3.llm.noop import NoOpLLMProvider
 from arc_agi3.llm.prompting import PromptBuilder
 from arc_agi3.llm.provider import LLMProvider
@@ -23,12 +23,22 @@ class LLMHookManager:
         self._last_call_step = -10**9
         self._call_count = 0
         self._traces: list[LLMDecisionTrace] = []
+        self._last_event_signature: tuple[str, ...] = ()
 
     @property
     def enabled(self) -> bool:
         return self.config.enabled
 
-    def rank_actions(self, observation: Observation, candidate_actions: list[Action], graph: StateGraph, game_memory: GameMemory, recent_states: list[str], step_idx: int) -> list[RankedAction]:
+    def rank_actions(
+        self,
+        observation: Observation,
+        candidate_actions: list[Action],
+        graph: StateGraph,
+        game_memory: GameMemory,
+        recent_states: list[str],
+        step_idx: int,
+        trigger_reason: str = "",
+    ) -> list[RankedAction]:
         if not self.enabled or not candidate_actions:
             return []
         if step_idx < self.config.start_step or self._call_count >= self.config.max_calls_per_episode:
@@ -37,17 +47,37 @@ class LLMHookManager:
         cache_key = self._cache_key(context)
         if self.config.cache_enabled and cache_key in self._cache:
             return self._cache[cache_key]
-        if step_idx - self._last_call_step < self.config.step_interval:
+        event_signature = tuple(context.recent_scene_events[-2:])
+        event_triggered = bool(event_signature) and event_signature != self._last_event_signature
+        if not event_triggered and not trigger_reason and step_idx - self._last_call_step < self.config.step_interval:
             return []
         bundle = self.provider.analyze(context)
         if self.config.trace_enabled:
             prompt = self.prompt_builder.build(context)
-            self._traces.append(LLMDecisionTrace(step_idx=step_idx, state_key=observation.state_key, prompt=prompt, raw_response=bundle.raw_response, ranked_actions=bundle.ranked_actions, hypotheses=bundle.hypotheses))
+            self._traces.append(
+                LLMDecisionTrace(
+                    step_idx=step_idx,
+                    state_key=observation.state_key,
+                    prompt=prompt,
+                    raw_response=bundle.raw_response,
+                    ranked_actions=bundle.ranked_actions,
+                    hypotheses=bundle.hypotheses,
+                    next_test=bundle.next_test,
+                )
+            )
         self._last_call_step = step_idx
+        self._last_event_signature = event_signature
         self._call_count += 1
         if bundle.hypotheses:
             game_memory.hypotheses.extend(bundle.hypotheses)
             game_memory.dedupe_hypotheses()
+        if bundle.next_test is not None:
+            available = {proposal.key: proposal for proposal in context.available_experiments}
+            selected = available.get(bundle.next_test.key)
+            if selected is not None:
+                selected.source = "llm"
+                selected.confidence = bundle.next_test.confidence
+                game_memory.experiments.activate(selected)
         ranked = bundle.ranked_actions[: self.config.max_ranked_actions]
         if self.config.cache_enabled:
             self._cache[cache_key] = ranked
@@ -61,6 +91,7 @@ class LLMHookManager:
         self._last_call_step = -10**9
         self._call_count = 0
         self._traces = []
+        self._last_event_signature = ()
 
     def close(self) -> None:
         self.provider.close()
@@ -111,6 +142,12 @@ class LLMHookManager:
             relation = {"type": "inspect_relation", "target": world.relation_candidates[0]}
             if relation not in subgoals:
                 subgoals.append(relation)
+        seen_action_keys = {
+            key
+            for node in graph.nodes.values()
+            for key in node.outgoing
+        }
+        available_experiments = game_memory.experiments.available(world, candidate_actions, seen_action_keys)
         return LLMContext(
             observation=observation,
             candidate_actions=candidate_actions,
@@ -131,6 +168,8 @@ class LLMHookManager:
             relation_candidates=world.relation_candidates,
             proposed_tests=world.hypothesis_library.proposed_tests(world),
             candidate_subgoals=subgoals,
+            available_experiments=available_experiments,
+            experiment_history=game_memory.experiments.summary_lines(),
         )
 
     def _click_is_display_like(self, point: tuple[int, int], world) -> bool:
@@ -147,7 +186,16 @@ class LLMHookManager:
         return False
 
     def _cache_key(self, context: LLMContext) -> str:
-        raw = {"state": context.observation.state_key, "actions": [action.key for action in context.candidate_actions], "recent_states": context.recent_states[-6:], "promising": context.known_promising_actions, "world": context.world_model_summary[:6], "transitions": context.latest_transitions[-4:]}
+        raw = {
+            "state": context.observation.state_key,
+            "actions": [action.key for action in context.candidate_actions],
+            "recent_states": context.recent_states[-6:],
+            "promising": context.known_promising_actions,
+            "world": context.world_model_summary[:6],
+            "events": context.recent_scene_events[-4:],
+            "experiments": [proposal.key for proposal in context.available_experiments],
+            "transitions": context.latest_transitions[-4:],
+        }
         return hashlib.sha1(repr(raw).encode("utf-8")).hexdigest()[:16]
 
     def _format_profile(self, profile) -> str:

@@ -37,6 +37,7 @@ class WorldModelHypothesesTest(unittest.TestCase):
         )
 
         self.assertTrue(world.relation_candidates)
+        self.assertIn("same_color:2", world.relation_details)
         self.assertIn("connect_same_color_regions", world.hypotheses)
         self.assertGreater(world.hypothesis_library.confidence("connect_same_feature"), 0.10)
 

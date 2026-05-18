@@ -74,6 +74,25 @@ class RuleHypothesis:
 
 
 @dataclass(slots=True)
+class ExperimentProposal:
+    key: str
+    kind: str
+    target: Any = None
+    rationale: str = ""
+    expected_if_true: str = ""
+    failure_signal: str = ""
+    source: str = "system"
+    confidence: float = 0.0
+
+
+@dataclass(slots=True)
+class ExperimentOutcome:
+    proposal: ExperimentProposal
+    status: str
+    evidence: str
+
+
+@dataclass(slots=True)
 class LLMDecisionTrace:
     step_idx: int
     state_key: str
@@ -81,6 +100,7 @@ class LLMDecisionTrace:
     raw_response: str
     ranked_actions: list[RankedAction] = field(default_factory=list)
     hypotheses: list[RuleHypothesis] = field(default_factory=list)
+    next_test: ExperimentProposal | None = None
 
 
 @dataclass(slots=True)

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from arc_agi3.core.config import LLMConfig
-from arc_agi3.core.types import Action, RankedAction, RuleHypothesis
+from arc_agi3.core.types import Action, ExperimentProposal, RankedAction, RuleHypothesis
 from arc_agi3.llm.prompting import PromptBuilder
 from arc_agi3.llm.types import LLMContext, LLMDecisionBundle
 
@@ -37,7 +37,7 @@ class TransformersLocalProvider:
     def analyze(self, context: LLMContext) -> LLMDecisionBundle:
         prompt = self._build_prompt(context)
         response_text = self._generate(prompt)
-        bundle = self._parse_response(response_text, context.candidate_actions)
+        bundle = self._parse_response(response_text, context.candidate_actions, context.available_experiments)
         bundle.raw_response = response_text
         return bundle
 
@@ -75,6 +75,11 @@ class TransformersLocalProvider:
 Respond in strict JSON only. Do not write markdown. Do not continue the chat.
 Use this schema:
 {
+  "next_test": {
+    "key": "one exact experiment key from Available executable experiments",
+    "confidence": 0-1,
+    "reason": "why this test is informative"
+  },
   "ranked_actions": [
     {"action": "one exact action key from Candidate actions", "score": 0-100, "reason": "short evidence-based reason"}
   ],
@@ -83,7 +88,9 @@ Use this schema:
   ]
 }
 Rules:
+- Prefer selecting one next_test when a listed experiment can reduce uncertainty.
 - Only mention exact action keys from Candidate actions.
+- Only mention exact experiment keys from Available executable experiments.
 - Return at most 3 ranked actions.
 - Use score 100 for the best safe action, lower for weaker actions.
 - Penalize unsafe/deadly/blocked/HUD-only/noop/loop actions.
@@ -124,8 +131,14 @@ Rules:
                 decoded = decoded[:idx]
         return decoded.strip()
 
-    def _parse_response(self, response_text: str, candidate_actions: list[Action]) -> LLMDecisionBundle:
+    def _parse_response(
+        self,
+        response_text: str,
+        candidate_actions: list[Action],
+        available_experiments: list[ExperimentProposal] | None = None,
+    ) -> LLMDecisionBundle:
         action_by_key = {action.key: action for action in candidate_actions}
+        experiments = available_experiments or []
         parsed = self._extract_json_object(response_text)
         if parsed is None:
             return self._fallback_parse(response_text, candidate_actions)
@@ -143,7 +156,36 @@ Rules:
         if self.config.include_hypotheses:
             for item in parsed.get("hypotheses", [])[:3]:
                 hypotheses.append(RuleHypothesis(summary=str(item.get("summary", ""))[:240], confidence=float(item.get("confidence", 0.0)), evidence=[str(x)[:160] for x in item.get("evidence", [])[:4]]))
-        return LLMDecisionBundle(ranked_actions=ranked_actions, hypotheses=hypotheses)
+        next_test = self._parse_next_test(parsed, experiments)
+        return LLMDecisionBundle(ranked_actions=ranked_actions, hypotheses=hypotheses, next_test=next_test)
+
+    def _parse_next_test(
+        self,
+        parsed: dict[str, Any],
+        available_experiments: list[ExperimentProposal],
+    ) -> ExperimentProposal | None:
+        raw = parsed.get("next_test")
+        if not isinstance(raw, dict):
+            return None
+        key = str(raw.get("key", ""))
+        by_key = {proposal.key: proposal for proposal in available_experiments}
+        proposal = by_key.get(key)
+        if proposal is None:
+            return None
+        try:
+            confidence = float(raw.get("confidence", 0.0))
+        except Exception:
+            confidence = 0.0
+        return ExperimentProposal(
+            key=proposal.key,
+            kind=proposal.kind,
+            target=proposal.target,
+            rationale=str(raw.get("reason", proposal.rationale))[:240],
+            expected_if_true=proposal.expected_if_true,
+            failure_signal=proposal.failure_signal,
+            source="llm",
+            confidence=max(0.0, min(1.0, confidence)),
+        )
 
     def _extract_json_object(self, response_text: str) -> dict[str, Any] | None:
         fenced_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL | re.IGNORECASE)
@@ -192,4 +234,3 @@ Rules:
             if len(ranked_actions) >= self.config.max_ranked_actions:
                 break
         return LLMDecisionBundle(ranked_actions=ranked_actions)
-

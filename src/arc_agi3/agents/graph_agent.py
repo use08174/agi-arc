@@ -50,6 +50,17 @@ class GraphSearchAgent(ArcAgentRuntime):
                 after_notes=next_observation.notes,
                 terminal_loss=result.done and not result.won,
             )
+            experiment_outcome = self.game_memory.experiments.observe_transition(
+                transition=transition,
+                after_notes=next_observation.notes,
+                world=self.game_memory.world_model,
+            )
+            if experiment_outcome is not None:
+                self.game_memory.world_model.hypothesis_library.apply_experiment_result(
+                    kind=experiment_outcome.proposal.kind,
+                    status=experiment_outcome.status,
+                    evidence=experiment_outcome.evidence,
+                )
             self._learn_from_transition(transition)
             self._learn_meta_action(transition)
             self._learn_action_semantics(transition)
@@ -79,6 +90,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             game_memory=self.game_memory,
             recent_states=list(self.recent_states),
             step_idx=step_idx,
+            trigger_reason="stalled" if force_exploration and step_idx >= self.config.budget.explore_phase_steps else "",
         )
         actions = self.explorer.reorder_with_rankings(
             observation=observation,
@@ -88,6 +100,13 @@ class GraphSearchAgent(ArcAgentRuntime):
             game_memory=self.game_memory,
             force_exploration=force_exploration,
         )
+        experiment_plan = self.planner.build_experiment_plan(
+            experiment=self.game_memory.experiments.active,
+            actions=actions,
+            game_memory=self.game_memory,
+        )
+        if experiment_plan:
+            return experiment_plan[0].action
         if not force_exploration:
             plan = self.planner.build_plan(
                 observation=observation,

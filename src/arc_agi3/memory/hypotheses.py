@@ -184,6 +184,30 @@ class HypothesisLibrary:
         family = self.families.get(name)
         return family.confidence if family is not None else 0.0
 
+    def apply_experiment_result(self, kind: str, status: str, evidence: str) -> None:
+        if kind == "collect_item":
+            if status == "confirmed":
+                self._support("collect_before_goal", 0.18, evidence)
+                self._support("sequence_required", 0.04, "collection experiment confirmed")
+            elif status == "contradicted":
+                self._contradict("collect_before_goal", 0.08, evidence)
+        elif kind == "activate_button":
+            if status == "confirmed":
+                self._support("switch_opens_path", 0.18, evidence)
+            elif status == "contradicted":
+                self._contradict("switch_opens_path", 0.08, evidence)
+        elif kind == "go_to_goal":
+            if status == "confirmed":
+                self._support("plain_navigation", 0.24, evidence)
+            elif status == "contradicted":
+                self._contradict("plain_navigation", 0.16, evidence)
+                self._support("state_match_before_goal", 0.12, evidence)
+        elif kind == "inspect_relation":
+            if status == "confirmed":
+                self._support("connect_same_feature", 0.22, evidence)
+            elif status == "contradicted":
+                self._contradict("connect_same_feature", 0.08, evidence)
+
     def _support(self, name: str, amount: float, evidence: str) -> None:
         self.families[name].support(amount, evidence)
 

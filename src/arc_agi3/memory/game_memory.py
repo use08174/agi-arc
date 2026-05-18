@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from arc_agi3.core.types import ActionSemanticProfile, RuleHypothesis
 from arc_agi3.memory.action_semantics import ActionSemanticsModel
+from arc_agi3.memory.experiments import ExperimentManager
 from arc_agi3.memory.world_model import WorldModel
 
 
@@ -41,6 +42,7 @@ class GameMemory:
     action_collectible_progress_counts: dict[str, int] = field(default_factory=dict)
     learned_action_semantics: ActionSemanticsModel = field(default_factory=ActionSemanticsModel)
     world_model: WorldModel = field(default_factory=WorldModel)
+    experiments: ExperimentManager = field(default_factory=ExperimentManager)
 
     def remember_effect(self, action_name: str, action_key: str, effect: str) -> None:
         self.action_semantics[action_name] = effect

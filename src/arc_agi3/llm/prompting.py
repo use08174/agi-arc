@@ -42,6 +42,16 @@ class PromptBuilder:
         if context.proposed_tests:
             lines.append("High-value tests proposed by hypothesis families:")
             lines.extend("- " + item for item in context.proposed_tests[:6])
+        if context.experiment_history:
+            lines.append("Experiment history:")
+            lines.extend("- " + item for item in context.experiment_history[-6:])
+        if context.available_experiments:
+            lines.append("Available executable experiments:")
+            for experiment in context.available_experiments[:12]:
+                lines.append(
+                    f"- {experiment.key}: kind={experiment.kind}; target={experiment.target}; "
+                    f"rationale={experiment.rationale}; expected={experiment.expected_if_true}; failure={experiment.failure_signal}"
+                )
         if context.candidate_subgoals:
             lines.append("Candidate subgoals:")
             lines.extend(f"- {item}" for item in context.candidate_subgoals[:8])
@@ -76,7 +86,8 @@ class PromptBuilder:
                 "If feedback flashes occur near a goal attempt, treat direct goal entry as possibly premature until a precondition is tested.",
                 "If same-color regions are disconnected, consider whether connecting them is the latent objective.",
                 "Use exact action keys including coordinates, for example ACTION6|x=32,y=32.",
-                "Return JSON only with ranked_actions and optional hypotheses. Hypotheses should name the task family when possible.",
+                "Choose next_test from Available executable experiments when one can reduce uncertainty. Prefer high-information tests over safe repetition.",
+                "Return JSON only with next_test, ranked_actions, and optional hypotheses. Hypotheses should name the task family when possible.",
             ]
         )
         return "\n".join(lines)

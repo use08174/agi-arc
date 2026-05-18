@@ -131,6 +131,11 @@ def main() -> None:
                         for item in trace.hypotheses
                     ]
                     print("llm_hypotheses=", rendered)
+                if trace.next_test is not None:
+                    print(
+                        "llm_next_test=",
+                        f"{trace.next_test.key} conf={trace.next_test.confidence:.2f} reason={trace.next_test.rationale}",
+                    )
     finally:
         try:
             if 'agent' in locals():

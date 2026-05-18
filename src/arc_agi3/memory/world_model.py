@@ -78,6 +78,21 @@ class SceneEvent:
 
 
 @dataclass(slots=True)
+class RelationCandidate:
+    key: str
+    color: int
+    centers: list[Cell]
+    nearest_pair: tuple[Cell, Cell]
+    min_distance: int
+
+    def summary(self) -> str:
+        return (
+            f"same_color_regions color={self.color} count={len(self.centers)} "
+            f"min_distance={self.min_distance} nearest_pair={self.nearest_pair}"
+        )
+
+
+@dataclass(slots=True)
 class GoalHypothesis:
     name: str
     confidence: float = 0.0
@@ -127,6 +142,7 @@ class WorldModel:
     hypotheses: dict[str, GoalHypothesis] = field(default_factory=dict)
     hypothesis_library: HypothesisLibrary = field(default_factory=HypothesisLibrary)
     relation_candidates: list[str] = field(default_factory=list)
+    relation_details: dict[str, RelationCandidate] = field(default_factory=dict)
     anchor_patch_states: dict[str, str] = field(default_factory=dict)
     anchor_patch_change_counts: Counter[str] = field(default_factory=Counter)
     semantic_ascii_map: str = ""
@@ -338,6 +354,9 @@ class WorldModel:
         )
         return legacy or self.hypothesis_library.confidence("state_match_before_goal") >= 0.30
 
+    def relation_for(self, key: str) -> RelationCandidate | None:
+        return self.relation_details.get(key)
+
     def _learn_object_rules(self, action: Action, before_notes: dict[str, Any], after_notes: dict[str, Any]) -> None:
         if action.name != "ACTION6":
             return
@@ -415,6 +434,7 @@ class WorldModel:
             if 2 <= area <= 64:
                 by_color.setdefault(int(obj.get("color", 0) or 0), []).append(obj)
         candidates: list[str] = []
+        details: dict[str, RelationCandidate] = {}
         for color, members in by_color.items():
             if len(members) < 2:
                 continue
@@ -422,11 +442,32 @@ class WorldModel:
             valid = [center for center in centers if center is not None]
             if len(valid) < 2:
                 continue
-            best = min(abs(a[0] - b[0]) + abs(a[1] - b[1]) for idx, a in enumerate(valid) for b in valid[idx + 1 :])
-            candidates.append(f"same_color_regions color={color} count={len(valid)} min_distance={best}")
-            if best > 1:
-                self._support_hypothesis("connect_same_color_regions", 0.08, f"same-color regions color={color} remain disconnected distance={best}")
+            best_distance, best_pair = min(
+                (
+                    abs(a[0] - b[0]) + abs(a[1] - b[1]),
+                    (a, b),
+                )
+                for idx, a in enumerate(valid)
+                for b in valid[idx + 1 :]
+            )
+            key = f"same_color:{color}"
+            relation = RelationCandidate(
+                key=key,
+                color=color,
+                centers=valid,
+                nearest_pair=best_pair,
+                min_distance=best_distance,
+            )
+            details[key] = relation
+            candidates.append(relation.summary())
+            if best_distance > 1:
+                self._support_hypothesis(
+                    "connect_same_color_regions",
+                    0.08,
+                    f"same-color regions color={color} remain disconnected distance={best_distance}",
+                )
         self.relation_candidates = candidates
+        self.relation_details = details
 
     def _learn_events_and_hypotheses(self, before_notes: dict[str, Any], after_notes: dict[str, Any]) -> None:
         removed = list((after_notes.get("collectible_changes", {}) or {}).get("removed", []) or [])

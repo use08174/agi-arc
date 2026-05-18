@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from arc_agi3.core.types import Action, Observation, PlanStep
+from arc_agi3.core.types import Action, ExperimentProposal, Observation, PlanStep
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.memory.state_graph import StateGraph
 from arc_agi3.planning.path_planner import PathPlanner
@@ -93,4 +93,29 @@ class SimplePlanner:
         if ranked:
             ranked.sort(key=lambda item: item[:-1])
             return [PlanStep(action=ranked[0][-1], reason="following least-looping promising safe transition")]
+        return []
+
+    def build_experiment_plan(
+        self,
+        experiment: ExperimentProposal | None,
+        actions: list[Action],
+        game_memory: GameMemory,
+    ) -> list[PlanStep]:
+        if experiment is None:
+            return []
+        world = game_memory.world_model
+        if experiment.kind in {"collect_item", "activate_button", "go_to_goal"} and isinstance(experiment.target, tuple):
+            path = self.path_planner.plan_to_targets(world, actions, {experiment.target})
+            if path:
+                return [PlanStep(action=path[0], reason=f"executing experiment {experiment.key}")]
+        if experiment.kind == "inspect_relation" and isinstance(experiment.target, dict):
+            pair = tuple(experiment.target.get("nearest_pair", ()))
+            relation_targets = {cell for cell in pair if isinstance(cell, tuple) and len(cell) == 2}
+            path = self.path_planner.plan_to_targets(world, actions, relation_targets)
+            if path:
+                return [PlanStep(action=path[0], reason=f"executing experiment {experiment.key}")]
+        if experiment.kind == "probe_action" and isinstance(experiment.target, str):
+            for action in actions:
+                if action.key == experiment.target:
+                    return [PlanStep(action=action, reason=f"executing experiment {experiment.key}")]
         return []
