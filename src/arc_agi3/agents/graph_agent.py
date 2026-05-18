@@ -126,6 +126,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             actions=actions,
             game_memory=self.game_memory,
         )
+        self.game_memory.experiments.note_plan_result(plannable=bool(experiment_plan))
         if experiment_plan:
             step = experiment_plan[0]
             return self._trace_decision(step_idx, observation, step.action, "experiment", step.reason)

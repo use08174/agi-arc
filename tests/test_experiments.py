@@ -222,6 +222,27 @@ class ExperimentTest(unittest.TestCase):
         self.assertFalse(changed)
         self.assertEqual(manager.active.key, "collect_item:1,1")
 
+    def test_unplannable_experiment_is_released_after_repeated_failures(self) -> None:
+        manager = ExperimentManager(
+            active=ExperimentProposal(key="collect_item:9,9", kind="collect_item", target=(9, 9))
+        )
+
+        self.assertIsNone(manager.note_plan_result(plannable=False))
+        self.assertIsNone(manager.note_plan_result(plannable=False))
+        outcome = manager.note_plan_result(plannable=False)
+
+        self.assertIsNotNone(outcome)
+        self.assertEqual(outcome.status, "inconclusive")
+        self.assertIsNone(manager.active)
+
+    def test_button_experiment_requires_supporting_evidence(self) -> None:
+        memory = GameMemory()
+        memory.world_model.visible_button_cells = {(3, 4)}
+
+        proposals = memory.experiments.available(memory.world_model, [Action(name="ACTION1")], set())
+
+        self.assertFalse(any(proposal.kind == "activate_button" for proposal in proposals))
+
 
 if __name__ == "__main__":
     unittest.main()

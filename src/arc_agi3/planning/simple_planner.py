@@ -58,11 +58,15 @@ class SimplePlanner:
                 continue
             profile = game_memory.semantic_profile(action.name, action.key)
             learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
-            is_promising = (
-                action.key in game_memory.promising_action_keys
-                or action.key in game_memory.changed_action_keys
-                or profile.reward_total > 0
+            hints = set(profile.interaction_hints)
+            is_semantically_promising = (
+                profile.reward_total > 0
                 or profile.collectible_progress > 0
+                or bool(hints.intersection({"pickup_or_consume", "spawn_or_unlock", "board_or_room_transform"}))
+            )
+            is_new_frontier = graph.seen_successor(observation.state_key, action) is None
+            is_promising = is_semantically_promising or (
+                is_new_frontier and action.key in game_memory.promising_action_keys
             )
             if not is_promising:
                 continue
@@ -74,7 +78,6 @@ class SimplePlanner:
                 continue
             successor = graph.seen_successor(observation.state_key, action)
             node = graph.nodes.get(successor) if successor is not None else None
-            hints = set(profile.interaction_hints)
             ranked.append(
                 (
                     successor is not None and node is not None and node.terminal and not node.winning_terminal,

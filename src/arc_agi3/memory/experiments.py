@@ -13,6 +13,7 @@ class ExperimentManager:
     active: ExperimentProposal | None = None
     history: list[ExperimentOutcome] = field(default_factory=list)
     completed_keys: set[str] = field(default_factory=set)
+    active_unplannable_steps: int = 0
 
     def available(self, world: Any, actions: list[Action], seen_action_keys: set[str]) -> list[ExperimentProposal]:
         proposals: list[ExperimentProposal] = []
@@ -28,18 +29,19 @@ class ExperimentManager:
                     failure_signal="target reached but no collectible or panel change occurs",
                 ),
             )
-        for target in sorted(world.visible_button_cells)[:4]:
-            self._append_if_new(
-                proposals,
-                ExperimentProposal(
-                    key=f"activate_button:{target[0]},{target[1]}",
-                    kind="activate_button",
-                    target=target,
-                    rationale="button-like object can test whether a passage or board state changes",
-                    expected_if_true="blocked region, room, or board layout changes",
-                    failure_signal="interaction produces only HUD/noop feedback",
-                ),
-            )
+        if self._button_tests_are_supported(world):
+            for target in sorted(world.visible_button_cells)[:4]:
+                self._append_if_new(
+                    proposals,
+                    ExperimentProposal(
+                        key=f"activate_button:{target[0]},{target[1]}",
+                        kind="activate_button",
+                        target=target,
+                        rationale="button-like object can test whether a passage or board state changes",
+                        expected_if_true="blocked region, room, or board layout changes",
+                        failure_signal="interaction produces only HUD/noop feedback",
+                    ),
+                )
         if not world.has_precondition_evidence():
             for target in sorted(world.visible_goal_cells)[:4]:
                 self._append_if_new(
@@ -126,12 +128,36 @@ class ExperimentManager:
 
     def activate(self, proposal: ExperimentProposal) -> None:
         self.active = proposal
+        self.active_unplannable_steps = 0
 
     def activate_if_idle(self, proposal: ExperimentProposal) -> bool:
         if self.active is not None:
             return False
         self.active = proposal
+        self.active_unplannable_steps = 0
         return True
+
+    def note_plan_result(self, plannable: bool, limit: int = 3) -> ExperimentOutcome | None:
+        proposal = self.active
+        if proposal is None:
+            return None
+        if plannable:
+            self.active_unplannable_steps = 0
+            return None
+        self.active_unplannable_steps += 1
+        if self.active_unplannable_steps < limit:
+            return None
+        outcome = ExperimentOutcome(
+            proposal=proposal,
+            status="inconclusive",
+            evidence="no_executable_plan_from_current_world_model",
+        )
+        self.history.append(outcome)
+        self.completed_keys.add(proposal.key)
+        self.active = None
+        self.active_unplannable_steps = 0
+        del self.history[:-24]
+        return outcome
 
     def observe_transition(
         self,
@@ -148,6 +174,7 @@ class ExperimentManager:
         self.history.append(outcome)
         self.completed_keys.add(proposal.key)
         self.active = None
+        self.active_unplannable_steps = 0
         del self.history[:-24]
         return outcome
 
@@ -257,6 +284,17 @@ class ExperimentManager:
         if proposal.key in self.completed_keys:
             return
         proposals.append(proposal)
+
+    def _button_tests_are_supported(self, world: Any) -> bool:
+        if not world.visible_button_cells:
+            return False
+        if world.hypothesis_library.confidence("switch_opens_path") >= 0.18:
+            return True
+        for track in world.likely_interactable_tracks():
+            affordance, confidence = track.best_affordance
+            if affordance == "door_candidate" and confidence >= 0.18:
+                return True
+        return False
 
     def _missing_axis_for_visible_targets(self, world: Any) -> str | None:
         if world.player_pos is None:
