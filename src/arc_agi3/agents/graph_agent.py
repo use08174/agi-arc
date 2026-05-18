@@ -115,7 +115,8 @@ class GraphSearchAgent(ArcAgentRuntime):
             return True
         if self.steps_since_new_state >= self.config.budget.novelty_patience_steps:
             return True
-        if self.graph.visits_for(observation.state_key) >= self.config.budget.revisit_limit:
+        recent_arrivals = sum(1 for state in self.recent_states if state == observation.state_key)
+        if recent_arrivals >= self.config.budget.revisit_limit:
             return True
         return False
 
