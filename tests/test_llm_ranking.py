@@ -96,6 +96,24 @@ class LLMRankingTest(unittest.TestCase):
         self.assertEqual(bundle.next_test.key, "collect_item:1,4")
         self.assertEqual(bundle.next_test.source, "llm_salvaged")
 
+    def test_transformers_provider_ignores_unstructured_thinking_text(self) -> None:
+        provider = TransformersLocalProvider(LLMConfig(enabled=True))
+        response = "<think>I should maybe use ACTION3 or ACTION4 while considering collect_item:1,4.</think>"
+
+        bundle = provider._parse_response(response, [Action(name="ACTION3"), Action(name="ACTION4")])
+
+        self.assertEqual(bundle.ranked_actions, [])
+        self.assertIsNone(bundle.next_test)
+
+    def test_transformers_provider_parses_json_after_completed_thinking_block(self) -> None:
+        provider = TransformersLocalProvider(LLMConfig(enabled=True))
+        response = """<think>internal reasoning</think>
+{"ranked_actions":[{"action":"ACTION4","score":90}]}"""
+
+        bundle = provider._parse_response(response, [Action(name="ACTION4")])
+
+        self.assertEqual(bundle.ranked_actions[0].action.name, "ACTION4")
+
     def test_transformers_provider_normalizes_loose_coordinate_action_keys(self) -> None:
         provider = TransformersLocalProvider(LLMConfig(enabled=True))
         action = Action(name="ACTION6", payload={"x": 1, "y": 4})

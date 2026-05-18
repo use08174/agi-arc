@@ -90,7 +90,7 @@ class PromptBuilder:
                 "If same-color regions are disconnected, consider whether connecting them is the latent objective.",
                 "Use exact action keys including coordinates, for example ACTION6|x=32,y=32.",
                 "Choose next_test from Available executable experiments when one can reduce uncertainty. Prefer high-information tests over safe repetition.",
-                "Return JSON only with next_test, ranked_actions, and optional hypotheses. Hypotheses should name the task family when possible.",
+                "Return one short JSON object only. Never output <think>, chain-of-thought, markdown, or prose outside JSON.",
             ]
         )
         return "\n".join(lines)

@@ -38,6 +38,14 @@ class TransformersLocalProvider:
         prompt = self._build_prompt(context)
         response_text = self._generate(prompt)
         bundle = self._parse_response(response_text, context.candidate_actions, context.available_experiments)
+        if not bundle.ranked_actions and bundle.next_test is None:
+            repair_prompt = self._build_repair_prompt(prompt, response_text)
+            repair_response = self._generate(repair_prompt)
+            repaired = self._parse_response(repair_response, context.candidate_actions, context.available_experiments)
+            if repaired.ranked_actions or repaired.next_test is not None:
+                repaired.raw_response = response_text + "\n\n[repair]\n" + repair_response
+                return repaired
+            response_text = response_text + "\n\n[repair]\n" + repair_response
         bundle.raw_response = response_text
         return bundle
 
@@ -92,17 +100,29 @@ Rules:
 - Penalize unsafe/deadly/blocked/HUD-only/noop/loop actions.
 - Prefer safe path progress or object-rule clicks.
 - Keep the JSON short. Do not include hypotheses unless explicitly requested.
+- Do not output <think>, reasoning, analysis, markdown fences, or any prose outside the JSON object.
 """
         return base + "\n" + output_format
 
     def _generate(self, prompt: str) -> str:
         loaded = self._load()
         messages = [
-            {"role": "system", "content": "You are a careful reasoning assistant for ARC-AGI-3 action ranking. Return JSON only."},
+            {
+                "role": "system",
+                "content": "You are an ARC-AGI-3 ranker. Return one short JSON object only. No thinking text. No explanation.",
+            },
             {"role": "user", "content": prompt},
         ]
         if hasattr(loaded.tokenizer, "apply_chat_template"):
-            text = loaded.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            try:
+                text = loaded.tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=False,
+                )
+            except TypeError:
+                text = loaded.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         else:
             text = "\n\n".join(f"{m['role']}: {m['content']}" for m in messages)
         model_inputs = loaded.tokenizer([text], return_tensors="pt")
@@ -126,7 +146,7 @@ Rules:
             idx = decoded.find(marker)
             if idx != -1:
                 decoded = decoded[:idx]
-        return decoded.strip()
+        return self._strip_thinking(decoded).strip()
 
     def _parse_response(
         self,
@@ -136,7 +156,7 @@ Rules:
     ) -> LLMDecisionBundle:
         action_by_key = {action.key: action for action in candidate_actions}
         experiments = available_experiments or []
-        parsed = self._extract_json_object(response_text)
+        parsed = self._extract_json_object(self._strip_thinking(response_text))
         if parsed is None:
             return self._fallback_parse(response_text, candidate_actions, experiments)
         ranked_actions: list[RankedAction] = []
@@ -227,24 +247,15 @@ Rules:
     ) -> LLMDecisionBundle:
         experiments = available_experiments or []
         next_test = self._salvage_next_test(response_text, experiments)
-        ranked_actions: list[RankedAction] = []
-        seen: set[str] = set()
-        for line in response_text.splitlines():
-            for action in candidate_actions:
-                variants = {action.key, self._loose_action_variant(action.key)}
-                if any(variant and variant in line for variant in variants) and action.key not in seen:
-                    seen.add(action.key)
-                    ranked_actions.append(RankedAction(action=action, score=1.0, reason="fallback parse"))
-                    break
-            if len(ranked_actions) >= self.config.max_ranked_actions:
-                break
-        return LLMDecisionBundle(ranked_actions=ranked_actions, next_test=next_test)
+        return LLMDecisionBundle(next_test=next_test)
 
     def _salvage_next_test(
         self,
         response_text: str,
         available_experiments: list[ExperimentProposal],
     ) -> ExperimentProposal | None:
+        if '"next_test"' not in response_text and "'next_test'" not in response_text:
+            return None
         by_key = {proposal.key: proposal for proposal in available_experiments}
         for key, proposal in by_key.items():
             if f'"key": "{key}"' in response_text or f"'key': '{key}'" in response_text:
@@ -261,6 +272,21 @@ Rules:
                     confidence=max(0.0, min(1.0, confidence)),
                 )
         return None
+
+    def _build_repair_prompt(self, original_prompt: str, invalid_response: str) -> str:
+        compact_invalid = invalid_response.strip().replace("\n", " ")[:320]
+        return (
+            original_prompt
+            + "\n\nYour previous answer was invalid because it was not one complete JSON object.\n"
+            + "Return only one minified JSON object now. No <think>. No prose. No markdown.\n"
+            + f"Invalid previous answer prefix: {compact_invalid}"
+        )
+
+    def _strip_thinking(self, text: str) -> str:
+        stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        if "<think>" in stripped.lower() and "</think>" not in stripped.lower():
+            return ""
+        return stripped
 
     def _normalize_action_key(self, raw_key: str, action_by_key: dict[str, Action]) -> str:
         if raw_key in action_by_key:
