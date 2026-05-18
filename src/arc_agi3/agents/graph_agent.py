@@ -176,7 +176,17 @@ class GraphSearchAgent(ArcAgentRuntime):
             if self.graph.action_is_probably_useless(observation.state_key, action):
                 continue
             filtered.append(action)
-        return filtered or actions
+        if filtered:
+            return filtered
+        non_meta = [
+            action
+            for action in actions
+            if action.name not in self.game_memory.restart_like_action_names
+            and action.key not in self.game_memory.restart_like_action_keys
+            and action.name not in self.game_memory.undo_like_action_names
+            and action.key not in self.game_memory.undo_like_action_keys
+        ]
+        return non_meta or actions
 
     def _learn_meta_action(self, transition: Transition) -> None:
         if transition.won or transition.reward_delta > 0:
@@ -210,8 +220,18 @@ class GraphSearchAgent(ArcAgentRuntime):
 
     def _fallback_action(self, observation: Observation, actions: list[Action]) -> Action:
         for action in actions:
+            if action.name in self.game_memory.restart_like_action_names or action.key in self.game_memory.restart_like_action_keys:
+                continue
+            if action.name in self.game_memory.undo_like_action_names or action.key in self.game_memory.undo_like_action_keys:
+                continue
             if self.game_memory.world_model.is_unsafe_action(action):
                 continue
             if not self.graph.action_is_probably_useless(observation.state_key, action):
                 return action
+        for action in actions:
+            if action.name in self.game_memory.restart_like_action_names or action.key in self.game_memory.restart_like_action_keys:
+                continue
+            if action.name in self.game_memory.undo_like_action_names or action.key in self.game_memory.undo_like_action_keys:
+                continue
+            return action
         return actions[0]

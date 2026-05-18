@@ -76,6 +76,16 @@ class RevertActionTest(unittest.TestCase):
         )
         self.assertEqual(agent.game_memory.learned_action_semantics.meaning_for("ACTION7").best_label[0], "undo_like")
 
+    def test_agent_does_not_reintroduce_undo_when_all_other_actions_are_noops(self) -> None:
+        agent = GraphSearchAgent()
+        current = observation(agent, ((1, 0, 0),))
+        agent.game_memory.remember_undo_like("ACTION7", "ACTION7")
+        agent.graph.noop_counts[(current.state_key, "ACTION3")] = 1
+
+        filtered = agent._filter_useless_actions(current, [Action(name="ACTION3"), Action(name="ACTION7")])
+
+        self.assertEqual([action.name for action in filtered], ["ACTION3"])
+
 
 if __name__ == "__main__":
     unittest.main()

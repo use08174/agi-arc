@@ -16,9 +16,19 @@ class SafetyShield:
     ) -> Action:
         world = game_memory.world_model
         if not self.is_safe(action, observation, game_memory):
-            for candidate in actions:
+            non_meta_candidates = [
+                candidate
+                for candidate in actions
+                if candidate.name not in game_memory.restart_like_action_names
+                and candidate.key not in game_memory.restart_like_action_keys
+                and candidate.name not in game_memory.undo_like_action_names
+                and candidate.key not in game_memory.undo_like_action_keys
+            ]
+            for candidate in non_meta_candidates:
                 if self.is_safe(candidate, observation, game_memory):
                     return candidate
+            if non_meta_candidates:
+                return non_meta_candidates[0]
         return action
 
     def is_safe(self, action: Action, observation: Observation, game_memory: GameMemory) -> bool:
