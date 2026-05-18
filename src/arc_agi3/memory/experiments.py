@@ -71,6 +71,43 @@ class ExperimentManager:
                     failure_signal="after inspecting endpoints, relation distance never decreases",
                 ),
             )
+        missing_axis = self._missing_axis_for_visible_targets(world)
+        if missing_axis is not None:
+            for action in actions:
+                if action.key in seen_action_keys:
+                    continue
+                self._append_if_new(
+                    proposals,
+                    ExperimentProposal(
+                        key=f"discover_axis:{missing_axis}:{action.key}",
+                        kind="discover_axis",
+                        target={"axis": missing_axis, "action_key": action.key},
+                        rationale=f"visible target requires {missing_axis} movement, but that axis is not learned yet",
+                        expected_if_true=f"action reveals {missing_axis} player movement",
+                        failure_signal="action does not move the player on the missing axis",
+                    ),
+                )
+        for track in world.likely_interactable_tracks():
+            affordance, confidence = track.best_affordance
+            if confidence < 0.18:
+                continue
+            self._append_if_new(
+                proposals,
+                ExperimentProposal(
+                    key=f"inspect_affordance:{track.track_id}",
+                    kind="inspect_affordance",
+                    target={
+                        "track_id": track.track_id,
+                        "center": track.center,
+                        "affordance": affordance,
+                        "baseline_blocking": track.best_affordance[0] == "blocking_candidate",
+                    },
+                    rationale=f"object {track.track_id} may be {affordance} and affect the route",
+                    expected_if_true="object moves, disappears, or opens nearby cells after interaction",
+                    failure_signal="reaching or acting near the object causes no object-level change",
+                    confidence=confidence,
+                ),
+            )
         for action in actions:
             if action.key in seen_action_keys:
                 continue
@@ -160,6 +197,33 @@ class ExperimentManager:
                 return ExperimentOutcome(proposal=proposal, status="confirmed", evidence="new action produced non-feedback state change")
             return ExperimentOutcome(proposal=proposal, status="contradicted", evidence="action produced noop_or_feedback_only")
 
+        if proposal.kind == "discover_axis" and isinstance(proposal.target, dict):
+            if transition.action.key != proposal.target.get("action_key"):
+                return None
+            axis = str(proposal.target.get("axis", ""))
+            before = after_notes.get("semantic_previous_player_pos")
+            after = after_notes.get("semantic_player_pos")
+            if isinstance(before, tuple) and isinstance(after, tuple):
+                dx = int(after[0]) - int(before[0])
+                dy = int(after[1]) - int(before[1])
+                moved_on_axis = (axis == "horizontal" and dx != 0) or (axis == "vertical" and dy != 0)
+                if moved_on_axis:
+                    return ExperimentOutcome(proposal=proposal, status="confirmed", evidence=f"revealed_{axis}_movement")
+            return ExperimentOutcome(proposal=proposal, status="contradicted", evidence=f"no_{axis}_movement")
+
+        if proposal.kind == "inspect_affordance" and isinstance(proposal.target, dict):
+            track_id = str(proposal.target.get("track_id", ""))
+            center = proposal.target.get("center")
+            track = world.object_tracks.get(track_id)
+            if track is None:
+                return ExperimentOutcome(proposal=proposal, status="confirmed", evidence="object_disappeared")
+            affordance, _ = track.best_affordance
+            if affordance in {"breakable_candidate", "pushable_candidate", "door_candidate"}:
+                return ExperimentOutcome(proposal=proposal, status="confirmed", evidence=f"affordance={affordance}")
+            if player_pos == center and transition.changed:
+                return ExperimentOutcome(proposal=proposal, status="contradicted", evidence="reached_object_without_affordance_change")
+            return None
+
         if proposal.kind == "inspect_relation" and isinstance(proposal.target, dict):
             key = str(proposal.target.get("relation_key", ""))
             baseline = int(proposal.target.get("baseline_distance", 0) or 0)
@@ -187,3 +251,21 @@ class ExperimentManager:
         if proposal.key in self.completed_keys:
             return
         proposals.append(proposal)
+
+    def _missing_axis_for_visible_targets(self, world: Any) -> str | None:
+        if world.player_pos is None:
+            return None
+        targets = world.visible_item_cells or world.visible_goal_cells or world.visible_button_cells
+        if not targets:
+            return None
+        px, py = world.player_pos
+        needs_horizontal = any(tx != px for tx, _ in targets)
+        needs_vertical = any(ty != py for _, ty in targets)
+        learned_vectors = list(world.action_move_vectors.values())
+        has_horizontal = any(dx != 0 for dx, _ in learned_vectors)
+        has_vertical = any(dy != 0 for _, dy in learned_vectors)
+        if needs_vertical and not has_vertical:
+            return "vertical"
+        if needs_horizontal and not has_horizontal:
+            return "horizontal"
+        return None

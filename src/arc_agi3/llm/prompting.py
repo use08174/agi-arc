@@ -82,6 +82,7 @@ class PromptBuilder:
                 "Important: HUD/counter/action-limit-bar changes alone are not progress.",
                 "Do not assume a static-looking panel is a goal. Infer roles from events: disappearance, movement, patch changes, feedback, and relations.",
                 "A plausible task may be collect->state-change->goal-gate, connect-same-color-regions, align/match panels, or plain reach-goal.",
+                "Use affordances: blocking candidates may need to be broken, pushed, toggled, or otherwise changed before a route opens.",
                 "If an object type disappeared after a click, infer an object rule such as click_removes and apply it to similar objects.",
                 "If feedback flashes occur near a goal attempt, treat direct goal entry as possibly premature until a precondition is tested.",
                 "If same-color regions are disconnected, consider whether connecting them is the latent objective.",

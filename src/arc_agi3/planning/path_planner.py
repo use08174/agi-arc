@@ -55,13 +55,20 @@ class PathPlanner:
         pos = world.player_pos
         if pos is None:
             return None
+        targets = world.visible_item_cells or world.visible_goal_cells or world.visible_button_cells
+        ranked: list[tuple[int, int, Action]] = []
         for action in actions:
             if action.name in world.action_move_vectors:
                 if world.is_unsafe_action(action, pos):
                     continue
                 target = world.predicted_target(pos, action.name)
                 if target is not None and target not in world.known_blocked_cells and target not in world.known_hazard_cells:
-                    return action
+                    before = _nearest_distance(pos, targets)
+                    after = _nearest_distance(target, targets)
+                    ranked.append((after - before, len(ranked), action))
+        if ranked:
+            ranked.sort(key=lambda item: (item[0], item[1]))
+            return ranked[0][2]
         return None
 
 
@@ -71,3 +78,10 @@ def _adjacent_to_any(cell: Cell, cells: set[Cell]) -> bool:
         if (nx, ny) in cells:
             return True
     return False
+
+
+def _nearest_distance(cell: Cell, targets: set[Cell]) -> int:
+    if not targets:
+        return 0
+    x, y = cell
+    return min(abs(x - tx) + abs(y - ty) for tx, ty in targets)

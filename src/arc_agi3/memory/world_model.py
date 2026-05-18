@@ -59,15 +59,25 @@ class ObjectTrack:
     disappeared_count: int = 0
     changed_count: int = 0
     role_scores: dict[str, float] = field(default_factory=dict)
+    affordance_scores: dict[str, float] = field(default_factory=dict)
 
     def bump_role(self, role: str, amount: float) -> None:
         self.role_scores[role] = min(1.0, self.role_scores.get(role, 0.0) + amount)
+
+    def bump_affordance(self, affordance: str, amount: float) -> None:
+        self.affordance_scores[affordance] = min(1.0, self.affordance_scores.get(affordance, 0.0) + amount)
 
     @property
     def best_role(self) -> tuple[str, float]:
         if not self.role_scores:
             return "unknown", 0.0
         return max(self.role_scores.items(), key=lambda item: item[1])
+
+    @property
+    def best_affordance(self) -> tuple[str, float]:
+        if not self.affordance_scores:
+            return "unknown", 0.0
+        return max(self.affordance_scores.items(), key=lambda item: item[1])
 
 
 @dataclass(slots=True)
@@ -138,6 +148,7 @@ class WorldModel:
     action_move_votes: dict[str, Counter[Cell]] = field(default_factory=dict)
     object_rules: dict[str, ObjectRule] = field(default_factory=dict)
     object_tracks: dict[str, ObjectTrack] = field(default_factory=dict)
+    likely_blocking_tracks: list[str] = field(default_factory=list)
     recent_events: list[SceneEvent] = field(default_factory=list)
     hypotheses: dict[str, GoalHypothesis] = field(default_factory=dict)
     hypothesis_library: HypothesisLibrary = field(default_factory=HypothesisLibrary)
@@ -200,6 +211,7 @@ class WorldModel:
             self.last_objects = [obj for obj in objects if isinstance(obj, dict)]
             self._update_tracks(self.last_objects)
             self._update_relation_candidates(self.last_objects)
+            self._update_blocking_affordances()
         self.hypothesis_library.observe_scene(self)
 
     def learn_transition(self, action: Action, before_notes: dict[str, Any], after_notes: dict[str, Any], terminal_loss: bool) -> None:
@@ -233,6 +245,7 @@ class WorldModel:
 
         self._learn_object_rules(action, before_notes, after_notes)
         self._learn_events_and_hypotheses(before_notes, after_notes)
+        self._learn_affordances(before_notes, after_notes)
         self.hypothesis_library.observe_transition(self, after_notes)
 
     def predicted_target(self, pos: Cell | None, action_name: str) -> Cell | None:
@@ -319,12 +332,15 @@ class WorldModel:
             rendered_tracks = []
             for track in sorted(self.object_tracks.values(), key=lambda item: (-item.seen_count, item.track_id))[:8]:
                 role, confidence = track.best_role
+                affordance, affordance_conf = track.best_affordance
                 rendered_tracks.append(
                     f"{track.track_id} color={track.color} center={track.center} shape={track.shape_signature} "
                     f"seen={track.seen_count} moved={track.moved_count} disappeared={track.disappeared_count} "
-                    f"role={role}:{confidence:.2f}"
+                    f"role={role}:{confidence:.2f} affordance={affordance}:{affordance_conf:.2f}"
                 )
             lines.append("object_tracks=" + " | ".join(rendered_tracks))
+        if self.likely_blocking_tracks:
+            lines.append("blocking_tracks=" + ", ".join(self.likely_blocking_tracks[:6]))
         if self.relation_candidates:
             lines.append("relation_candidates=" + " | ".join(self.relation_candidates[:6]))
         if self.hypotheses:
@@ -353,6 +369,15 @@ class WorldModel:
             for name in ("collection_changes_state", "goal_requires_state_match")
         )
         return legacy or self.hypothesis_library.confidence("state_match_before_goal") >= 0.30
+
+    def likely_interactable_tracks(self, limit: int = 6) -> list[ObjectTrack]:
+        tracks = [
+            track
+            for track in self.object_tracks.values()
+            if track.best_affordance[0] in {"breakable_candidate", "pushable_candidate", "door_candidate"}
+        ]
+        tracks.sort(key=lambda track: (-track.best_affordance[1], track.track_id))
+        return tracks[:limit]
 
     def relation_for(self, key: str) -> RelationCandidate | None:
         return self.relation_details.get(key)
@@ -413,6 +438,8 @@ class WorldModel:
             anchor = str(obj.get("anchor", ""))
             if anchor.startswith("bottom_"):
                 track.bump_role("display_candidate", 0.06)
+            if str(obj.get("role", "")) == "wall" and 4 <= track.area <= 64:
+                track.bump_affordance("blocking_candidate", 0.08)
         for track_id in unmatched:
             self.object_tracks[track_id].disappeared_count += 1
 
@@ -518,6 +545,51 @@ class WorldModel:
                     track.changed_count += 1
                     track.bump_role("mutable_panel", 0.22)
 
+    def _update_blocking_affordances(self) -> None:
+        self.likely_blocking_tracks = []
+        if self.player_pos is None:
+            return
+        targets = self.visible_goal_cells or self.visible_item_cells or self.visible_button_cells
+        if not targets:
+            return
+        px, py = self.player_pos
+        for track in self.object_tracks.values():
+            if track.area > 96:
+                continue
+            tx, ty = track.center
+            for gx, gy in targets:
+                aligned = (px == gx == tx and min(py, gy) <= ty <= max(py, gy)) or (
+                    py == gy == ty and min(px, gx) <= tx <= max(px, gx)
+                )
+                if aligned:
+                    track.bump_affordance("blocking_candidate", 0.18)
+                    self.likely_blocking_tracks.append(track.track_id)
+                    break
+
+    def _learn_affordances(self, before_notes: dict[str, Any], after_notes: dict[str, Any]) -> None:
+        interaction_hint = str(after_notes.get("interaction_hint", "unknown"))
+        removed = list((after_notes.get("collectible_changes", {}) or {}).get("removed", []) or [])
+        if removed:
+            for track in self.object_tracks.values():
+                if track.disappeared_count > 0:
+                    track.bump_affordance("breakable_candidate", 0.26)
+        if interaction_hint == "entity_move_or_push":
+            for track in self.object_tracks.values():
+                if track.moved_count > 0:
+                    track.bump_affordance("pushable_candidate", 0.30)
+        if interaction_hint in {"spawn_or_unlock", "board_or_room_transform"}:
+            for track in self.object_tracks.values():
+                role, role_conf = track.best_role
+                if role == "button" or role_conf >= 0.2:
+                    track.bump_affordance("door_candidate", 0.10)
+        before_blocked = _blocked_cells(before_notes)
+        after_blocked = _blocked_cells(after_notes)
+        opened_cells = before_blocked - after_blocked
+        if opened_cells:
+            for track in self.object_tracks.values():
+                if track.center in opened_cells or _adjacent_to_any(track.center, opened_cells):
+                    track.bump_affordance("door_candidate", 0.28)
+
     def _track_anchor(self, track: ObjectTrack) -> str:
         width = int(self.last_notes.get("semantic_width", 0) or 0)
         height = int(self.last_notes.get("semantic_height", 0) or 0)
@@ -565,3 +637,20 @@ def _nearest_small_object(notes: dict[str, Any]) -> dict[str, Any] | None:
     objects = [obj for obj in notes.get("semantic_objects", []) or [] if isinstance(obj, dict)]
     objects = [obj for obj in objects if int(obj.get("area", 9999) or 9999) <= 16]
     return objects[0] if objects else None
+
+
+def _blocked_cells(notes: dict[str, Any]) -> set[Cell]:
+    blocked: set[Cell] = set()
+    for item in notes.get("semantic_walls", []) or []:
+        bbox = item.get("bbox")
+        if not isinstance(bbox, dict):
+            continue
+        for y in range(int(bbox["min_y"]), int(bbox["max_y"]) + 1):
+            for x in range(int(bbox["min_x"]), int(bbox["max_x"]) + 1):
+                blocked.add((x, y))
+    return blocked
+
+
+def _adjacent_to_any(cell: Cell, cells: set[Cell]) -> bool:
+    x, y = cell
+    return any((nx, ny) in cells for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)))

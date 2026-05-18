@@ -110,6 +110,66 @@ class WorldModelHypothesesTest(unittest.TestCase):
         track = next(iter(world.object_tracks.values()))
         self.assertEqual(track.best_role[0], "mutable_panel")
 
+    def test_safe_probe_prefers_move_toward_visible_goal(self) -> None:
+        world = WorldModel(
+            player_pos=(1, 1),
+            visible_goal_cells={(1, 0)},
+            action_move_vectors={"ACTION1": (-1, 0), "ACTION2": (0, -1)},
+        )
+
+        action = PathPlanner().safe_probe_action(world, [Action(name="ACTION1"), Action(name="ACTION2")])
+
+        self.assertEqual(action.name, "ACTION2")
+
+    def test_aligned_small_object_becomes_blocking_candidate(self) -> None:
+        world = WorldModel()
+        world.update_from_observation(
+            {
+                "semantic_player_pos": (0, 1),
+                "semantic_goals": [{"bbox": {"min_x": 4, "max_x": 4, "min_y": 1, "max_y": 1}}],
+                "semantic_objects": [
+                    {
+                        "color": 6,
+                        "shape_signature": "box",
+                        "bbox": {"min_x": 2, "max_x": 2, "min_y": 1, "max_y": 1},
+                        "area": 4,
+                        "role": "wall",
+                        "confidence": 0.4,
+                    }
+                ],
+            }
+        )
+
+        track = next(iter(world.object_tracks.values()))
+        self.assertEqual(track.best_affordance[0], "blocking_candidate")
+        self.assertIn(track.track_id, world.likely_blocking_tracks)
+
+    def test_disappearing_object_becomes_breakable_candidate(self) -> None:
+        world = WorldModel()
+        world.update_from_observation(
+            {
+                "semantic_objects": [
+                    {
+                        "color": 6,
+                        "shape_signature": "box",
+                        "bbox": {"min_x": 2, "max_x": 2, "min_y": 1, "max_y": 1},
+                        "area": 4,
+                    }
+                ]
+            }
+        )
+        track = next(iter(world.object_tracks.values()))
+        track.disappeared_count = 1
+
+        world.learn_transition(
+            action=Action(name="ACTION1"),
+            before_notes={},
+            after_notes={"collectible_changes": {"removed": ["box"]}},
+            terminal_loss=False,
+        )
+
+        self.assertEqual(track.best_affordance[0], "breakable_candidate")
+
 
 if __name__ == "__main__":
     unittest.main()

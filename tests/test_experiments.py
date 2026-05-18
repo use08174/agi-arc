@@ -134,6 +134,59 @@ class ExperimentTest(unittest.TestCase):
         self.assertIsNotNone(outcome)
         self.assertEqual(outcome.status, "confirmed")
 
+    def test_missing_vertical_axis_creates_discovery_experiment(self) -> None:
+        memory = GameMemory()
+        world = memory.world_model
+        world.player_pos = (1, 1)
+        world.visible_goal_cells = {(1, 4)}
+        world.action_move_vectors["ACTION1"] = (1, 0)
+
+        proposals = memory.experiments.available(
+            world,
+            [Action(name="ACTION1"), Action(name="ACTION2")],
+            {"ACTION1"},
+        )
+
+        self.assertTrue(any(proposal.key == "discover_axis:vertical:ACTION2" for proposal in proposals))
+
+    def test_axis_discovery_experiment_can_be_planned_directly(self) -> None:
+        memory = GameMemory()
+        proposal = ExperimentProposal(
+            key="discover_axis:vertical:ACTION2",
+            kind="discover_axis",
+            target={"axis": "vertical", "action_key": "ACTION2"},
+        )
+
+        plan = SimplePlanner().build_experiment_plan(
+            proposal,
+            [Action(name="ACTION1"), Action(name="ACTION2")],
+            memory,
+        )
+
+        self.assertEqual(plan[0].action.name, "ACTION2")
+
+    def test_interactable_affordance_creates_experiment(self) -> None:
+        memory = GameMemory()
+        world = memory.world_model
+        world.update_from_observation(
+            {
+                "semantic_objects": [
+                    {
+                        "color": 6,
+                        "shape_signature": "box",
+                        "bbox": {"min_x": 2, "max_x": 2, "min_y": 1, "max_y": 1},
+                        "area": 4,
+                    }
+                ]
+            }
+        )
+        track = next(iter(world.object_tracks.values()))
+        track.bump_affordance("breakable_candidate", 0.4)
+
+        proposals = memory.experiments.available(world, [Action(name="ACTION1")], set())
+
+        self.assertTrue(any(proposal.kind == "inspect_affordance" for proposal in proposals))
+
 
 if __name__ == "__main__":
     unittest.main()

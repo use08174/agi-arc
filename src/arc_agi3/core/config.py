@@ -34,7 +34,7 @@ class LLMConfig:
     device: str = "auto"
     dtype: str = "auto"
     max_ranked_actions: int = 3
-    include_hypotheses: bool = True
+    include_hypotheses: bool = False
     max_new_tokens: int = 256
     temperature: float = 0.0
     top_p: float = 1.0

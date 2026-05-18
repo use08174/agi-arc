@@ -45,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-start-step", type=int, default=8)
     parser.add_argument("--llm-step-interval", type=int, default=8)
     parser.add_argument("--llm-max-calls", type=int, default=12)
-    parser.add_argument("--llm-max-new-tokens", type=int, default=192)
+    parser.add_argument("--llm-max-new-tokens", type=int, default=256)
     parser.add_argument("--llm-show-trace", action="store_true")
     parser.add_argument("--llm-show-prompt", action="store_true")
     return parser.parse_args()

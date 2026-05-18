@@ -114,6 +114,17 @@ class SimplePlanner:
             path = self.path_planner.plan_to_targets(world, actions, relation_targets)
             if path:
                 return [PlanStep(action=path[0], reason=f"executing experiment {experiment.key}")]
+        if experiment.kind == "discover_axis" and isinstance(experiment.target, dict):
+            action_key = experiment.target.get("action_key")
+            for action in actions:
+                if action.key == action_key:
+                    return [PlanStep(action=action, reason=f"executing experiment {experiment.key}")]
+        if experiment.kind == "inspect_affordance" and isinstance(experiment.target, dict):
+            center = experiment.target.get("center")
+            if isinstance(center, tuple):
+                path = self.path_planner.plan_to_targets(world, actions, {center})
+                if path:
+                    return [PlanStep(action=path[0], reason=f"executing experiment {experiment.key}")]
         if experiment.kind == "probe_action" and isinstance(experiment.target, str):
             for action in actions:
                 if action.key == experiment.target:

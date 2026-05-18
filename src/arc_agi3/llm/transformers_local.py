@@ -77,14 +77,10 @@ Use this schema:
 {
   "next_test": {
     "key": "one exact experiment key from Available executable experiments",
-    "confidence": 0-1,
-    "reason": "why this test is informative"
+    "confidence": 0-1
   },
   "ranked_actions": [
-    {"action": "one exact action key from Candidate actions", "score": 0-100, "reason": "short evidence-based reason"}
-  ],
-  "hypotheses": [
-    {"summary": "short rule hypothesis", "confidence": 0-1, "evidence": ["fact 1", "fact 2"]}
+    {"action": "one exact action key from Candidate actions", "score": 0-100}
   ]
 }
 Rules:
@@ -95,6 +91,7 @@ Rules:
 - Use score 100 for the best safe action, lower for weaker actions.
 - Penalize unsafe/deadly/blocked/HUD-only/noop/loop actions.
 - Prefer safe path progress or object-rule clicks.
+- Keep the JSON short. Do not include hypotheses unless explicitly requested.
 """
         return base + "\n" + output_format
 
@@ -141,10 +138,10 @@ Rules:
         experiments = available_experiments or []
         parsed = self._extract_json_object(response_text)
         if parsed is None:
-            return self._fallback_parse(response_text, candidate_actions)
+            return self._fallback_parse(response_text, candidate_actions, experiments)
         ranked_actions: list[RankedAction] = []
         for item in parsed.get("ranked_actions", [])[: self.config.max_ranked_actions]:
-            key = item.get("action", "")
+            key = self._normalize_action_key(str(item.get("action", "")), action_by_key)
             if key not in action_by_key:
                 continue
             try:
@@ -222,15 +219,56 @@ Rules:
             return None
         return parsed if isinstance(parsed, dict) else None
 
-    def _fallback_parse(self, response_text: str, candidate_actions: list[Action]) -> LLMDecisionBundle:
+    def _fallback_parse(
+        self,
+        response_text: str,
+        candidate_actions: list[Action],
+        available_experiments: list[ExperimentProposal] | None = None,
+    ) -> LLMDecisionBundle:
+        experiments = available_experiments or []
+        next_test = self._salvage_next_test(response_text, experiments)
         ranked_actions: list[RankedAction] = []
         seen: set[str] = set()
         for line in response_text.splitlines():
             for action in candidate_actions:
-                if action.key in line and action.key not in seen:
+                variants = {action.key, self._loose_action_variant(action.key)}
+                if any(variant and variant in line for variant in variants) and action.key not in seen:
                     seen.add(action.key)
                     ranked_actions.append(RankedAction(action=action, score=1.0, reason="fallback parse"))
                     break
             if len(ranked_actions) >= self.config.max_ranked_actions:
                 break
-        return LLMDecisionBundle(ranked_actions=ranked_actions)
+        return LLMDecisionBundle(ranked_actions=ranked_actions, next_test=next_test)
+
+    def _salvage_next_test(
+        self,
+        response_text: str,
+        available_experiments: list[ExperimentProposal],
+    ) -> ExperimentProposal | None:
+        by_key = {proposal.key: proposal for proposal in available_experiments}
+        for key, proposal in by_key.items():
+            if f'"key": "{key}"' in response_text or f"'key': '{key}'" in response_text:
+                confidence_match = re.search(r'"confidence"\s*:\s*([0-9]*\.?[0-9]+)', response_text)
+                confidence = float(confidence_match.group(1)) if confidence_match else 0.0
+                return ExperimentProposal(
+                    key=proposal.key,
+                    kind=proposal.kind,
+                    target=proposal.target,
+                    rationale=proposal.rationale,
+                    expected_if_true=proposal.expected_if_true,
+                    failure_signal=proposal.failure_signal,
+                    source="llm_salvaged",
+                    confidence=max(0.0, min(1.0, confidence)),
+                )
+        return None
+
+    def _normalize_action_key(self, raw_key: str, action_by_key: dict[str, Action]) -> str:
+        if raw_key in action_by_key:
+            return raw_key
+        normalized = re.sub(r"\|x=(-?\d+),\s*(-?\d+)$", r"|x=\1,y=\2", raw_key)
+        if normalized in action_by_key:
+            return normalized
+        return raw_key
+
+    def _loose_action_variant(self, key: str) -> str:
+        return re.sub(r"\|x=(-?\d+),y=(-?\d+)$", r"|x=\1,\2", key)
