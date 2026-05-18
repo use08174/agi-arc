@@ -265,7 +265,14 @@ class WorldModel:
         target = self.predicted_target(pos, action.name)
         if target is None:
             return False
-        return target in self.known_hazard_cells or target in self.known_blocked_cells
+        return target in self.known_hazard_cells
+
+    def is_blocked_action(self, action: Action, pos: Cell | None = None) -> bool:
+        pos = pos if pos is not None else self.player_pos
+        if pos is None:
+            return False
+        target = self.predicted_target(pos, action.name)
+        return target is not None and target in self.known_blocked_cells
 
     def preferred_click_targets(self, limit: int = 8) -> list[Cell]:
         targets: list[Cell] = []

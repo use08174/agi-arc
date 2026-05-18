@@ -263,19 +263,27 @@ class GraphSearchAgent(ArcAgentRuntime):
         )
 
     def _fallback_action(self, observation: Observation, actions: list[Action]) -> Action:
-        for action in actions:
+        ranked = []
+        recent = set(self.recent_actions)
+        for index, action in enumerate(actions):
             if action.name in self.game_memory.restart_like_action_names or action.key in self.game_memory.restart_like_action_keys:
                 continue
             if action.name in self.game_memory.undo_like_action_names or action.key in self.game_memory.undo_like_action_keys:
                 continue
             if self.game_memory.world_model.is_unsafe_action(action):
                 continue
-            if not self.graph.action_is_probably_useless(observation.state_key, action):
-                return action
-        for action in actions:
-            if action.name in self.game_memory.restart_like_action_names or action.key in self.game_memory.restart_like_action_keys:
-                continue
-            if action.name in self.game_memory.undo_like_action_names or action.key in self.game_memory.undo_like_action_keys:
-                continue
-            return action
+            meaning = self.game_memory.learned_action_semantics.meaning_for(action.name)
+            ranked.append(
+                (
+                    self.graph.action_is_probably_useless(observation.state_key, action),
+                    self.game_memory.world_model.is_blocked_action(action),
+                    action.name in recent,
+                    meaning.uses,
+                    index,
+                    action,
+                )
+            )
+        if ranked:
+            ranked.sort(key=lambda item: item[:-1])
+            return ranked[0][-1]
         return actions[0]

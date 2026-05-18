@@ -170,6 +170,18 @@ class WorldModelHypothesesTest(unittest.TestCase):
 
         self.assertEqual(track.best_affordance[0], "breakable_candidate")
 
+    def test_blocked_move_is_not_treated_as_unsafe(self) -> None:
+        world = WorldModel(
+            player_pos=(0, 0),
+            known_blocked_cells={(1, 0)},
+            action_move_vectors={"ACTION1": (1, 0)},
+        )
+
+        action = Action(name="ACTION1")
+
+        self.assertFalse(world.is_unsafe_action(action))
+        self.assertTrue(world.is_blocked_action(action))
+
 
 if __name__ == "__main__":
     unittest.main()

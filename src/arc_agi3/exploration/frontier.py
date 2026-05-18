@@ -39,6 +39,7 @@ class FrontierExplorer:
             known_collectible = profile.collectible_progress > 0
             globally_noop = profile.uses >= 2 and profile.changed_uses == 0 and profile.reward_total <= 0
             terminal_loss = profile.terminal_losses > 0
+            blocked = world.is_blocked_action(action)
             loops_recent = successor in recent_states if successor is not None else False
             back_edge = graph.is_back_edge(observation.state_key, successor) if successor is not None else False
             target = world.predicted_target(world.player_pos, action.name)
@@ -56,6 +57,7 @@ class FrontierExplorer:
                 (
                     terminal_loss,
                     learned_label in {"restart_like", "undo_like", "hud_only"} and learned_confidence >= 0.6,
+                    blocked,
                     not unseen_from_state if force_exploration else False,
                     globally_noop and not unseen_from_state,
                     loops_recent,
@@ -96,6 +98,7 @@ class FrontierExplorer:
 
         def bucket(action: Action) -> tuple:
             unsafe = world.is_unsafe_action(action)
+            blocked = world.is_blocked_action(action)
             restart_like = action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys
             undo_like = action.name in game_memory.undo_like_action_names or action.key in game_memory.undo_like_action_keys
             learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
@@ -111,6 +114,8 @@ class FrontierExplorer:
                 return (8, rank_index, action.key)
             if unsafe:
                 return (9, rank_index, action.key)
+            if blocked:
+                return (7, rank_index, action.key)
             if unseen and force_exploration:
                 return (0, score, rank_index, action.key)
             if action.key in game_memory.promising_action_keys:

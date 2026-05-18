@@ -4,7 +4,7 @@ import unittest
 
 from arc_agi3.agents.graph_agent import GraphSearchAgent
 from arc_agi3.core.config import AgentConfig
-from arc_agi3.core.types import Observation
+from arc_agi3.core.types import Action, Observation
 
 
 class ExplorationPressureTest(unittest.TestCase):
@@ -29,6 +29,18 @@ class ExplorationPressureTest(unittest.TestCase):
         agent.recent_actions.extend(["ACTION1", "ACTION2", "ACTION1", "ACTION2"])
 
         self.assertTrue(agent._should_force_counterfactual_exploration())
+
+    def test_fallback_prefers_less_recent_action_instead_of_first_action(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        observation = Observation(state_key="s0", frame=None, changed=True)  # type: ignore[arg-type]
+        agent.recent_actions.extend(["ACTION3", "ACTION3", "ACTION3"])
+
+        action = agent._fallback_action(
+            observation,
+            [Action(name="ACTION3"), Action(name="ACTION4")],
+        )
+
+        self.assertEqual(action.name, "ACTION4")
 
 
 if __name__ == "__main__":
