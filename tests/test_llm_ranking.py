@@ -4,7 +4,7 @@ import unittest
 
 from arc_agi3.agents.graph_agent import GraphSearchAgent
 from arc_agi3.core.config import AgentConfig, LLMConfig
-from arc_agi3.core.types import Action, ExperimentProposal, Observation, RankedAction
+from arc_agi3.core.types import Action, ExperimentProposal, LLMDirective, Observation, RankedAction
 from arc_agi3.llm.provider import LLMProvider
 from arc_agi3.llm.transformers_local import TransformersLocalProvider
 from arc_agi3.llm.types import LLMContext, LLMDecisionBundle
@@ -131,6 +131,35 @@ class LLMRankingTest(unittest.TestCase):
 
         self.assertEqual(bundle.ranked_actions[0].action.key, "ACTION6|x=1,y=4")
 
+    def test_transformers_provider_parses_directive(self) -> None:
+        provider = TransformersLocalProvider(LLMConfig(enabled=True))
+        action = Action(name="ACTION6", payload={"x": 1, "y": 4})
+        experiments = [
+            ExperimentProposal(
+                key="collect_item:1,4",
+                kind="collect_item",
+                target=(1, 4),
+            )
+        ]
+        response = """{
+          "directive": {
+            "goal_key": "collect_item:1,4",
+            "summary": "collect nearest item",
+            "preferred_action": "ACTION6|x=1,y=4",
+            "avoid_actions": ["ACTION3"],
+            "commitment_steps": 5,
+            "confidence": 0.8
+          },
+          "ranked_actions": []
+        }"""
+
+        bundle = provider._parse_response(response, [Action(name="ACTION3"), action], experiments)
+
+        self.assertIsNotNone(bundle.directive)
+        self.assertEqual(bundle.directive.goal_key, "collect_item:1,4")
+        self.assertEqual(bundle.directive.preferred_action.key, "ACTION6|x=1,y=4")
+        self.assertEqual(bundle.directive.avoid_action_keys, ["ACTION3"])
+
     def test_unseen_actions_stay_ahead_of_seen_ranked_actions_during_exploration(self) -> None:
         agent = GraphSearchAgent(config=AgentConfig(), llm_config=LLMConfig(enabled=True))
         observation = Observation(state_key="s0", frame=None, changed=True)  # type: ignore[arg-type]
@@ -193,6 +222,21 @@ class LLMRankingTest(unittest.TestCase):
         )
 
         self.assertEqual(chosen.name, "ACTION3")
+
+    def test_directed_mode_prefers_llm_direct_action(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig(), llm_config=LLMConfig(enabled=True, control_mode="directed"))
+        agent.safety_shield = type("Shield", (), {"validate_or_replace": lambda self, action, observation, actions, game_memory: action})()
+        agent.llm._directive = LLMDirective(
+            preferred_action=Action(name="ACTION4"),
+            commitment_steps=4,
+            confidence=0.8,
+        )
+        agent.llm._directive_expires_at_step = 10
+        observation = Observation(state_key="s0", frame=None, changed=True)  # type: ignore[arg-type]
+
+        chosen = agent._choose_action(0, observation, [Action(name="ACTION3"), Action(name="ACTION4")])
+
+        self.assertEqual(chosen.name, "ACTION4")
 
 
 if __name__ == "__main__":

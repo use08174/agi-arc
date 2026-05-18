@@ -183,6 +183,8 @@ official offline evaluator automatically when `--mode offline` is used:
     --llm-start-step 8 \
     --llm-step-interval 8 \
     --llm-max-calls 100 \
+    --llm-control-mode directed \
+    --llm-thinking-mode brief \
     --llm-show-trace
 ```
 

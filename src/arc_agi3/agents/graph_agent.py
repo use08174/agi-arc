@@ -172,6 +172,8 @@ class GraphSearchAgent(ArcAgentRuntime):
             step_idx=step_idx,
             trigger_reason="stalled" if force_exploration and step_idx >= self.config.budget.explore_phase_steps else "",
         )
+        directive = self.llm.active_directive(step_idx)
+        actions = self._apply_llm_avoid_list(actions, directive)
         actions = self.explorer.reorder_with_rankings(
             observation=observation,
             actions=actions,
@@ -180,6 +182,25 @@ class GraphSearchAgent(ArcAgentRuntime):
             game_memory=self.game_memory,
             force_exploration=force_exploration,
         )
+        experiment_plan = self.planner.build_experiment_plan(
+            experiment=self.game_memory.experiments.active,
+            actions=actions,
+            game_memory=self.game_memory,
+        )
+        self.game_memory.experiments.note_plan_result(plannable=bool(experiment_plan))
+        if experiment_plan and directive is not None and self.llm_config.control_mode == "directed":
+            step = experiment_plan[0]
+            return self._trace_decision(step_idx, observation, step.action, "llm_director", step.reason)
+        if directive is not None and self.llm_config.control_mode == "directed":
+            directed_action = self._directed_action(directive, actions)
+            if directed_action is not None:
+                return self._trace_decision(
+                    step_idx,
+                    observation,
+                    directed_action,
+                    "llm_director",
+                    directive.goal_summary or "following LLM preferred action",
+                )
         if self._should_force_counterfactual_exploration():
             counterfactual = self.explorer.choose_counterfactual_action(
                 observation=observation,
@@ -190,12 +211,6 @@ class GraphSearchAgent(ArcAgentRuntime):
             )
             if counterfactual is not None:
                 return self._trace_decision(step_idx, observation, counterfactual, "counterfactual", "breaking repetitive low-progress action loop")
-        experiment_plan = self.planner.build_experiment_plan(
-            experiment=self.game_memory.experiments.active,
-            actions=actions,
-            game_memory=self.game_memory,
-        )
-        self.game_memory.experiments.note_plan_result(plannable=bool(experiment_plan))
         if experiment_plan:
             step = experiment_plan[0]
             return self._trace_decision(step_idx, observation, step.action, "experiment", step.reason)
@@ -222,6 +237,21 @@ class GraphSearchAgent(ArcAgentRuntime):
             fallback = self._fallback_action(observation, actions)
             return self._trace_decision(step_idx, observation, fallback, "fallback", "no ranked frontier action")
         return self._trace_decision(step_idx, observation, action, "explorer", "frontier selection")
+
+    def _apply_llm_avoid_list(self, actions: list[Action], directive) -> list[Action]:
+        if directive is None or not directive.avoid_action_keys:
+            return actions
+        filtered = [action for action in actions if action.key not in directive.avoid_action_keys]
+        return filtered or actions
+
+    def _directed_action(self, directive, actions: list[Action]) -> Action | None:
+        preferred = directive.preferred_action
+        if preferred is None:
+            return None
+        for action in actions:
+            if action.key == preferred.key:
+                return action
+        return None
 
     def _trace_decision(self, step_idx: int, observation: Observation, action: Action, source: str, reason: str) -> Action:
         self.decision_traces.append(

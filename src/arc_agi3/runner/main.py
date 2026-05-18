@@ -42,6 +42,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-device", default="auto")
     parser.add_argument("--llm-dtype", default="auto")
     parser.add_argument("--llm-max-ranked-actions", type=int, default=3)
+    parser.add_argument(
+        "--llm-control-mode",
+        choices=["ranked", "directed"],
+        default="directed",
+    )
     parser.add_argument("--llm-start-step", type=int, default=8)
     parser.add_argument("--llm-step-interval", type=int, default=8)
     parser.add_argument("--llm-max-calls", type=int, default=12)
@@ -73,6 +78,7 @@ def main() -> None:
         device=args.llm_device,
         dtype=args.llm_dtype,
         max_ranked_actions=args.llm_max_ranked_actions,
+        control_mode=args.llm_control_mode,
         start_step=args.llm_start_step,
         step_interval=args.llm_step_interval,
         max_calls_per_episode=args.llm_max_calls,
@@ -150,6 +156,14 @@ def main() -> None:
                     print(
                         "llm_next_test=",
                         f"{trace.next_test.key} conf={trace.next_test.confidence:.2f} reason={trace.next_test.rationale}",
+                    )
+                if trace.directive is not None:
+                    preferred = trace.directive.preferred_action.key if trace.directive.preferred_action is not None else "none"
+                    print(
+                        "llm_directive=",
+                        f"goal={trace.directive.goal_key or 'none'} preferred={preferred} "
+                        f"avoid={trace.directive.avoid_action_keys} commitment={trace.directive.commitment_steps} "
+                        f"conf={trace.directive.confidence:.2f} summary={trace.directive.goal_summary}",
                     )
     finally:
         try:

@@ -93,6 +93,16 @@ class ExperimentOutcome:
 
 
 @dataclass(slots=True)
+class LLMDirective:
+    goal_key: str = ""
+    goal_summary: str = ""
+    preferred_action: Action | None = None
+    avoid_action_keys: list[str] = field(default_factory=list)
+    commitment_steps: int = 0
+    confidence: float = 0.0
+
+
+@dataclass(slots=True)
 class LLMDecisionTrace:
     step_idx: int
     state_key: str
@@ -101,6 +111,7 @@ class LLMDecisionTrace:
     ranked_actions: list[RankedAction] = field(default_factory=list)
     hypotheses: list[RuleHypothesis] = field(default_factory=list)
     next_test: ExperimentProposal | None = None
+    directive: LLMDirective | None = None
 
 
 @dataclass(slots=True)

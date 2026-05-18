@@ -48,6 +48,7 @@ class MyAgent(Agent):
         llm_config = LLMConfig(
             enabled=os.getenv("ARC_AGI3_LLM_ENABLED", "0") == "1",
             provider=os.getenv("ARC_AGI3_LLM_PROVIDER", "noop"),
+            control_mode=os.getenv("ARC_AGI3_LLM_CONTROL_MODE", "directed"),
             model=os.getenv("ARC_AGI3_LLM_MODEL", ""),
             model_path=os.getenv("ARC_AGI3_LLM_MODEL_PATH", ""),
             device=os.getenv("ARC_AGI3_LLM_DEVICE", "auto"),
@@ -98,5 +99,13 @@ class MyAgent(Agent):
                 print(
                     "llm_next_test=",
                     f"{trace.next_test.key} conf={trace.next_test.confidence:.2f} reason={trace.next_test.rationale}",
+                )
+            if trace.directive is not None:
+                preferred = trace.directive.preferred_action.key if trace.directive.preferred_action is not None else "none"
+                print(
+                    "llm_directive=",
+                    f"goal={trace.directive.goal_key or 'none'} preferred={preferred} "
+                    f"avoid={trace.directive.avoid_action_keys} commitment={trace.directive.commitment_steps} "
+                    f"conf={trace.directive.confidence:.2f} summary={trace.directive.goal_summary}",
                 )
         self._printed_llm_traces = len(traces)

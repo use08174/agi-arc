@@ -47,6 +47,9 @@ class PromptBuilder:
         if context.experiment_history:
             lines.append("Experiment history:")
             lines.extend("- " + item for item in context.experiment_history[-6:])
+        if context.active_directive_summary:
+            lines.append("Current LLM directive:")
+            lines.append("- " + context.active_directive_summary)
         if context.available_experiments:
             lines.append("Available executable experiments:")
             for experiment in context.available_experiments[:12]:
@@ -89,6 +92,7 @@ class PromptBuilder:
                 "If feedback flashes occur near a goal attempt, treat direct goal entry as possibly premature until a precondition is tested.",
                 "If same-color regions are disconnected, consider whether connecting them is the latent objective.",
                 "Use exact action keys including coordinates, for example ACTION6|x=32,y=32.",
+                "Choose a directive: one current goal to pursue for several steps, exact actions to avoid, and the best immediate action if known.",
                 "Choose next_test from Available executable experiments when one can reduce uncertainty. Prefer high-information tests over safe repetition.",
                 "After any brief internal reasoning, finish with one short JSON object only; no markdown or prose outside the final JSON.",
             ]

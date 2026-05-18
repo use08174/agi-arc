@@ -51,6 +51,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-start-step", type=int, default=8)
     parser.add_argument("--llm-step-interval", type=int, default=8)
     parser.add_argument("--llm-max-calls", type=int, default=12)
+    parser.add_argument(
+        "--llm-control-mode",
+        choices=["ranked", "directed"],
+        default="directed",
+    )
     parser.add_argument("--llm-max-new-tokens", type=int, default=192)
     parser.add_argument(
         "--llm-thinking-mode",
@@ -76,6 +81,7 @@ def main() -> None:
         os.environ["ARC_AGI3_EXPLORE_STEPS"] = str(args.explore_steps)
         os.environ["ARC_AGI3_LLM_ENABLED"] = "1"
         os.environ["ARC_AGI3_LLM_PROVIDER"] = "transformers_local"
+        os.environ["ARC_AGI3_LLM_CONTROL_MODE"] = args.llm_control_mode
         os.environ["ARC_AGI3_LLM_MODEL_PATH"] = model_path
         os.environ["ARC_AGI3_LLM_DEVICE"] = args.llm_device
         os.environ["ARC_AGI3_LLM_START_STEP"] = str(args.llm_start_step)
@@ -113,6 +119,8 @@ def main() -> None:
         "--llm-enabled",
         "--llm-provider",
         "transformers_local",
+        "--llm-control-mode",
+        args.llm_control_mode,
         "--llm-model-path",
         model_path,
         "--llm-device",

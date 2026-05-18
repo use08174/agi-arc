@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from arc_agi3.core.config import LLMConfig
-from arc_agi3.core.types import Action, ExperimentProposal, RankedAction, RuleHypothesis
+from arc_agi3.core.types import Action, ExperimentProposal, LLMDirective, RankedAction, RuleHypothesis
 from arc_agi3.llm.prompting import PromptBuilder
 from arc_agi3.llm.types import LLMContext, LLMDecisionBundle
 
@@ -38,11 +38,11 @@ class TransformersLocalProvider:
         prompt = self._build_prompt(context)
         response_text = self._generate(prompt, thinking_mode=self.config.thinking_mode)
         bundle = self._parse_response(response_text, context.candidate_actions, context.available_experiments)
-        if not bundle.ranked_actions and bundle.next_test is None:
+        if not bundle.ranked_actions and bundle.next_test is None and bundle.directive is None:
             repair_prompt = self._build_repair_prompt(prompt, response_text)
             repair_response = self._generate(repair_prompt, thinking_mode="off")
             repaired = self._parse_response(repair_response, context.candidate_actions, context.available_experiments)
-            if repaired.ranked_actions or repaired.next_test is not None:
+            if repaired.ranked_actions or repaired.next_test is not None or repaired.directive is not None:
                 repaired.raw_response = response_text + "\n\n[repair]\n" + repair_response
                 return repaired
             response_text = response_text + "\n\n[repair]\n" + repair_response
@@ -83,6 +83,14 @@ class TransformersLocalProvider:
 Respond in strict JSON only. Do not write markdown. Do not continue the chat.
 Use this schema:
 {
+  "directive": {
+    "goal_key": "one exact experiment key from Available executable experiments or empty string",
+    "summary": "short interpretation of the current goal",
+    "preferred_action": "one exact action key from Candidate actions or empty string",
+    "avoid_actions": ["exact action keys to avoid"],
+    "commitment_steps": 1-8,
+    "confidence": 0-1
+  },
   "next_test": {
     "key": "one exact experiment key from Available executable experiments",
     "confidence": 0-1
@@ -93,6 +101,9 @@ Use this schema:
 }
 Rules:
 - Prefer selecting one next_test when a listed experiment can reduce uncertainty.
+- If one experiment should guide the next several steps, set directive.goal_key to it.
+- Use directive.preferred_action only when one exact immediate action is clearly best.
+- Use directive.avoid_actions for exact actions that are loops, feedback-only, or strategically wrong now.
 - Only mention exact action keys from Candidate actions.
 - Only mention exact experiment keys from Available executable experiments.
 - Return at most 3 ranked actions.
@@ -187,7 +198,13 @@ Rules:
             for item in parsed.get("hypotheses", [])[:3]:
                 hypotheses.append(RuleHypothesis(summary=str(item.get("summary", ""))[:240], confidence=float(item.get("confidence", 0.0)), evidence=[str(x)[:160] for x in item.get("evidence", [])[:4]]))
         next_test = self._parse_next_test(parsed, experiments)
-        return LLMDecisionBundle(ranked_actions=ranked_actions, hypotheses=hypotheses, next_test=next_test)
+        directive = self._parse_directive(parsed, action_by_key, experiments)
+        return LLMDecisionBundle(
+            ranked_actions=ranked_actions,
+            hypotheses=hypotheses,
+            next_test=next_test,
+            directive=directive,
+        )
 
     def _parse_next_test(
         self,
@@ -214,6 +231,45 @@ Rules:
             expected_if_true=proposal.expected_if_true,
             failure_signal=proposal.failure_signal,
             source="llm",
+            confidence=max(0.0, min(1.0, confidence)),
+        )
+
+    def _parse_directive(
+        self,
+        parsed: dict[str, Any],
+        action_by_key: dict[str, Action],
+        available_experiments: list[ExperimentProposal],
+    ) -> LLMDirective | None:
+        raw = parsed.get("directive")
+        if not isinstance(raw, dict):
+            return None
+        experiments = {proposal.key: proposal for proposal in available_experiments}
+        goal_key = str(raw.get("goal_key", ""))
+        if goal_key and goal_key not in experiments:
+            goal_key = ""
+        preferred_key = self._normalize_action_key(str(raw.get("preferred_action", "")), action_by_key)
+        preferred_action = action_by_key.get(preferred_key)
+        avoid_action_keys: list[str] = []
+        for item in list(raw.get("avoid_actions", []) or [])[:6]:
+            normalized = self._normalize_action_key(str(item), action_by_key)
+            if normalized in action_by_key and normalized not in avoid_action_keys:
+                avoid_action_keys.append(normalized)
+        try:
+            commitment_steps = int(raw.get("commitment_steps", 0))
+        except Exception:
+            commitment_steps = 0
+        try:
+            confidence = float(raw.get("confidence", 0.0))
+        except Exception:
+            confidence = 0.0
+        if not goal_key and preferred_action is None and not avoid_action_keys:
+            return None
+        return LLMDirective(
+            goal_key=goal_key,
+            goal_summary=str(raw.get("summary", ""))[:240],
+            preferred_action=preferred_action,
+            avoid_action_keys=avoid_action_keys,
+            commitment_steps=max(1, min(8, commitment_steps or 4)),
             confidence=max(0.0, min(1.0, confidence)),
         )
 

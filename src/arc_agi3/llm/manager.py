@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 
 from arc_agi3.core.config import LLMConfig
-from arc_agi3.core.types import Action, ExperimentProposal, LLMDecisionTrace, Observation, RankedAction, RuleHypothesis
+from arc_agi3.core.types import Action, ExperimentProposal, LLMDecisionTrace, LLMDirective, Observation, RankedAction, RuleHypothesis
 from arc_agi3.llm.noop import NoOpLLMProvider
 from arc_agi3.llm.prompting import PromptBuilder
 from arc_agi3.llm.provider import LLMProvider
@@ -19,11 +19,13 @@ class LLMHookManager:
         self.config = config or LLMConfig()
         self.provider = provider or NoOpLLMProvider()
         self.prompt_builder = PromptBuilder()
-        self._cache: dict[str, list[RankedAction]] = {}
+        self._cache: dict[str, tuple[list[RankedAction], LLMDirective | None]] = {}
         self._last_call_step = -10**9
         self._call_count = 0
         self._traces: list[LLMDecisionTrace] = []
         self._last_event_signature: tuple[str, ...] = ()
+        self._directive: LLMDirective | None = None
+        self._directive_expires_at_step = -1
 
     @property
     def enabled(self) -> bool:
@@ -46,7 +48,10 @@ class LLMHookManager:
         context = self._build_context(observation, candidate_actions, graph, game_memory, recent_states)
         cache_key = self._cache_key(context)
         if self.config.cache_enabled and cache_key in self._cache:
-            return self._cache[cache_key]
+            ranked, directive = self._cache[cache_key]
+            if directive is not None:
+                self._set_directive(directive, step_idx, context.available_experiments, game_memory)
+            return ranked
         event_signature = tuple(context.recent_scene_events[-2:])
         event_triggered = bool(event_signature) and event_signature != self._last_event_signature
         if not event_triggered and not trigger_reason and step_idx - self._last_call_step < self.config.step_interval:
@@ -63,6 +68,7 @@ class LLMHookManager:
                     ranked_actions=bundle.ranked_actions,
                     hypotheses=bundle.hypotheses,
                     next_test=bundle.next_test,
+                    directive=bundle.directive,
                 )
             )
         self._last_call_step = step_idx
@@ -78,9 +84,11 @@ class LLMHookManager:
                 selected.source = "llm"
                 selected.confidence = bundle.next_test.confidence
                 game_memory.experiments.activate_if_idle(selected)
+        if bundle.directive is not None:
+            self._set_directive(bundle.directive, step_idx, context.available_experiments, game_memory)
         ranked = bundle.ranked_actions[: self.config.max_ranked_actions]
         if self.config.cache_enabled:
-            self._cache[cache_key] = ranked
+            self._cache[cache_key] = (ranked, bundle.directive)
         return ranked
 
     def build_prompt(self, observation: Observation, candidate_actions: list[Action], graph: StateGraph, game_memory: GameMemory, recent_states: list[str]) -> str:
@@ -92,12 +100,19 @@ class LLMHookManager:
         self._call_count = 0
         self._traces = []
         self._last_event_signature = ()
+        self._directive = None
+        self._directive_expires_at_step = -1
 
     def close(self) -> None:
         self.provider.close()
 
     def recent_traces(self) -> list[LLMDecisionTrace]:
         return list(self._traces)
+
+    def active_directive(self, step_idx: int) -> LLMDirective | None:
+        if self._directive is None or step_idx > self._directive_expires_at_step:
+            return None
+        return self._directive
 
     def _build_context(self, observation: Observation, candidate_actions: list[Action], graph: StateGraph, game_memory: GameMemory, recent_states: list[str]) -> LLMContext:
         latest_transitions = [
@@ -145,6 +160,7 @@ class LLMHookManager:
         current_node = graph.nodes.get(observation.state_key)
         seen_action_keys = set(current_node.outgoing) if current_node is not None else set()
         available_experiments = game_memory.experiments.available(world, candidate_actions, seen_action_keys)
+        directive = self.active_directive(step_idx=max(self._last_call_step, 0))
         return LLMContext(
             observation=observation,
             candidate_actions=candidate_actions,
@@ -167,6 +183,7 @@ class LLMHookManager:
             candidate_subgoals=subgoals,
             available_experiments=available_experiments,
             experiment_history=game_memory.experiments.summary_lines(),
+            active_directive_summary=self._format_directive(directive),
         )
 
     def _click_is_display_like(self, point: tuple[int, int], world) -> bool:
@@ -194,6 +211,38 @@ class LLMHookManager:
             "transitions": context.latest_transitions[-4:],
         }
         return hashlib.sha1(repr(raw).encode("utf-8")).hexdigest()[:16]
+
+    def _set_directive(
+        self,
+        directive: LLMDirective,
+        step_idx: int,
+        available_experiments: list[ExperimentProposal],
+        game_memory: GameMemory,
+    ) -> None:
+        self._directive = directive
+        self._directive_expires_at_step = step_idx + max(1, directive.commitment_steps)
+        if not directive.goal_key or directive.confidence < 0.35:
+            return
+        available = {proposal.key: proposal for proposal in available_experiments}
+        selected = available.get(directive.goal_key)
+        if selected is None:
+            return
+        selected.source = "llm_director"
+        selected.confidence = directive.confidence
+        active = game_memory.experiments.active
+        if active is None or active.key != selected.key:
+            game_memory.experiments.activate(selected)
+
+    def _format_directive(self, directive: LLMDirective | None) -> str:
+        if directive is None:
+            return ""
+        preferred = directive.preferred_action.key if directive.preferred_action is not None else "none"
+        avoid = ",".join(directive.avoid_action_keys) or "none"
+        return (
+            f"goal={directive.goal_key or 'none'} preferred_action={preferred} avoid={avoid} "
+            f"commitment={directive.commitment_steps} conf={directive.confidence:.2f} "
+            f"summary={directive.goal_summary or 'none'}"
+        )
 
     def _format_profile(self, profile) -> str:
         top_axes = ",".join(profile.top_motion_axes) or "none"

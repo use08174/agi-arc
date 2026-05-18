@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from arc_agi3.core.types import Action, ExperimentProposal, Observation, RankedAction, RuleHypothesis
+from arc_agi3.core.types import Action, ExperimentProposal, LLMDirective, Observation, RankedAction, RuleHypothesis
 
 
 @dataclass(slots=True)
@@ -29,6 +29,7 @@ class LLMContext:
     candidate_subgoals: list[dict[str, Any]] = field(default_factory=list)
     available_experiments: list[ExperimentProposal] = field(default_factory=list)
     experiment_history: list[str] = field(default_factory=list)
+    active_directive_summary: str = ""
 
 
 @dataclass(slots=True)
@@ -36,4 +37,5 @@ class LLMDecisionBundle:
     ranked_actions: list[RankedAction] = field(default_factory=list)
     hypotheses: list[RuleHypothesis] = field(default_factory=list)
     next_test: ExperimentProposal | None = None
+    directive: LLMDirective | None = None
     raw_response: str = ""

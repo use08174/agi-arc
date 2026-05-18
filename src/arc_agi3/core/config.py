@@ -36,6 +36,7 @@ class LLMConfig:
     device: str = "auto"
     dtype: str = "auto"
     max_ranked_actions: int = 3
+    control_mode: str = "directed"
     include_hypotheses: bool = False
     max_new_tokens: int = 256
     thinking_mode: str = "brief"
