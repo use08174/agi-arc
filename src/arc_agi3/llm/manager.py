@@ -77,7 +77,7 @@ class LLMHookManager:
             if selected is not None:
                 selected.source = "llm"
                 selected.confidence = bundle.next_test.confidence
-                game_memory.experiments.activate(selected)
+                game_memory.experiments.activate_if_idle(selected)
         ranked = bundle.ranked_actions[: self.config.max_ranked_actions]
         if self.config.cache_enabled:
             self._cache[cache_key] = ranked

@@ -197,6 +197,18 @@ class ExperimentTest(unittest.TestCase):
 
         self.assertTrue(any(proposal.key == "probe_action:ACTION2" for proposal in proposals))
 
+    def test_active_experiment_is_not_replaced_while_in_progress(self) -> None:
+        manager = ExperimentManager(
+            active=ExperimentProposal(key="collect_item:1,1", kind="collect_item", target=(1, 1))
+        )
+
+        changed = manager.activate_if_idle(
+            ExperimentProposal(key="collect_item:2,2", kind="collect_item", target=(2, 2))
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual(manager.active.key, "collect_item:1,1")
+
 
 if __name__ == "__main__":
     unittest.main()

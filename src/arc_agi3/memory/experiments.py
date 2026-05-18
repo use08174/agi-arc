@@ -127,6 +127,12 @@ class ExperimentManager:
     def activate(self, proposal: ExperimentProposal) -> None:
         self.active = proposal
 
+    def activate_if_idle(self, proposal: ExperimentProposal) -> bool:
+        if self.active is not None:
+            return False
+        self.active = proposal
+        return True
+
     def observe_transition(
         self,
         transition: Transition,
