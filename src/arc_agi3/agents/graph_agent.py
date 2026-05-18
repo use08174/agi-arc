@@ -64,10 +64,21 @@ class GraphSearchAgent(ArcAgentRuntime):
             self._learn_from_transition(transition)
             self._learn_meta_action(transition)
             self._learn_action_semantics(transition)
+            self.recent_actions.append(action.name)
             if discovered_new_state:
                 self.steps_since_new_state = 0
             else:
                 self.steps_since_new_state += 1
+            semantic_progress = bool(
+                result.reward_delta > 0
+                or next_observation.notes.get("collectible_progress", False)
+                or next_observation.notes.get("anchor_patch_changes", [])
+                or (experiment_outcome is not None and experiment_outcome.status == "confirmed")
+            )
+            if semantic_progress:
+                self.steps_since_semantic_progress = 0
+            else:
+                self.steps_since_semantic_progress += 1
             if result.done:
                 self.last_episode_end_reason = "environment_done"
                 self.last_episode_final_status = result.frame.status.value
@@ -100,6 +111,16 @@ class GraphSearchAgent(ArcAgentRuntime):
             game_memory=self.game_memory,
             force_exploration=force_exploration,
         )
+        if self._should_force_counterfactual_exploration():
+            counterfactual = self.explorer.choose_counterfactual_action(
+                observation=observation,
+                actions=actions,
+                graph=self.graph,
+                game_memory=self.game_memory,
+                recent_action_names=list(self.recent_actions),
+            )
+            if counterfactual is not None:
+                return counterfactual
         experiment_plan = self.planner.build_experiment_plan(
             experiment=self.game_memory.experiments.active,
             actions=actions,
@@ -128,6 +149,13 @@ class GraphSearchAgent(ArcAgentRuntime):
         if action is None:
             return self._fallback_action(observation, actions)
         return action
+
+    def _should_force_counterfactual_exploration(self) -> bool:
+        if self.steps_since_semantic_progress < self.config.budget.semantic_patience_steps:
+            return False
+        if len(self.recent_actions) < 3:
+            return False
+        return len(set(self.recent_actions)) <= 2
 
     def _should_force_exploration(self, step_idx: int, observation: Observation) -> bool:
         if step_idx < self.config.budget.explore_phase_steps:

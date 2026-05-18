@@ -187,6 +187,16 @@ class ExperimentTest(unittest.TestCase):
 
         self.assertTrue(any(proposal.kind == "inspect_affordance" for proposal in proposals))
 
+    def test_probe_action_is_available_again_in_new_state_context(self) -> None:
+        memory = GameMemory()
+        proposals = memory.experiments.available(
+            memory.world_model,
+            [Action(name="ACTION1"), Action(name="ACTION2")],
+            {"ACTION1"},
+        )
+
+        self.assertTrue(any(proposal.key == "probe_action:ACTION2" for proposal in proposals))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -142,11 +142,8 @@ class LLMHookManager:
             relation = {"type": "inspect_relation", "target": world.relation_candidates[0]}
             if relation not in subgoals:
                 subgoals.append(relation)
-        seen_action_keys = {
-            key
-            for node in graph.nodes.values()
-            for key in node.outgoing
-        }
+        current_node = graph.nodes.get(observation.state_key)
+        seen_action_keys = set(current_node.outgoing) if current_node is not None else set()
         available_experiments = game_memory.experiments.available(world, candidate_actions, seen_action_keys)
         return LLMContext(
             observation=observation,

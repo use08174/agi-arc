@@ -149,6 +149,25 @@ class LLMRankingTest(unittest.TestCase):
 
         self.assertEqual(reordered[0].name, "ACTION2")
 
+    def test_counterfactual_action_prefers_unseen_nonrecent_action(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        observation = Observation(state_key="s0", frame=None, changed=True)  # type: ignore[arg-type]
+        actions = [Action(name="ACTION1"), Action(name="ACTION2"), Action(name="ACTION3")]
+        graph = StateGraph()
+        graph.touch("s0")
+        graph.nodes["s0"].outgoing["ACTION1"] = "s1"
+        graph.nodes["s0"].outgoing["ACTION2"] = "s2"
+
+        chosen = agent.explorer.choose_counterfactual_action(
+            observation=observation,
+            actions=actions,
+            graph=graph,
+            game_memory=GameMemory(),
+            recent_action_names=["ACTION1", "ACTION2", "ACTION1"],
+        )
+
+        self.assertEqual(chosen.name, "ACTION3")
+
 
 if __name__ == "__main__":
     unittest.main()

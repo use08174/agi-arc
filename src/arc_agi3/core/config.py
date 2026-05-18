@@ -15,6 +15,8 @@ class BudgetConfig:
     revisit_limit: int = 3
     recent_state_window: int = 12
     novelty_patience_steps: int = 6
+    semantic_patience_steps: int = 4
+    recent_action_window: int = 6
 
 
 @dataclass(slots=True)

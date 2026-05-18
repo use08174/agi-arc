@@ -120,3 +120,41 @@ class FrontierExplorer:
             return (3, score, rank_index, action.key)
 
         return sorted(actions, key=bucket)
+
+    def choose_counterfactual_action(
+        self,
+        observation: Observation,
+        actions: list[Action],
+        graph: StateGraph,
+        game_memory: GameMemory,
+        recent_action_names: list[str],
+    ) -> Action | None:
+        world = game_memory.world_model
+        ranked = []
+        recent = set(recent_action_names)
+        for index, action in enumerate(actions):
+            if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
+                continue
+            if action.name in game_memory.undo_like_action_names or action.key in game_memory.undo_like_action_keys:
+                continue
+            if world.is_unsafe_action(action):
+                continue
+            successor = graph.seen_successor(observation.state_key, action)
+            if graph.action_is_probably_useless(observation.state_key, action):
+                continue
+            meaning = game_memory.learned_action_semantics.meaning_for(action.name)
+            learned_label, learned_confidence = meaning.best_label
+            ranked.append(
+                (
+                    successor is not None,
+                    action.name in recent,
+                    learned_label not in {"unknown"} and learned_confidence >= 0.6,
+                    meaning.uses,
+                    index,
+                    action,
+                )
+            )
+        if not ranked:
+            return None
+        ranked.sort(key=lambda item: item[:-1])
+        return ranked[0][-1]

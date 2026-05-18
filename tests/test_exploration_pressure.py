@@ -23,6 +23,13 @@ class ExplorationPressureTest(unittest.TestCase):
 
         self.assertTrue(agent._should_force_exploration(step_idx=99, observation=observation))
 
+    def test_agent_enters_counterfactual_mode_after_repetitive_low_progress_actions(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        agent.steps_since_semantic_progress = agent.config.budget.semantic_patience_steps
+        agent.recent_actions.extend(["ACTION1", "ACTION2", "ACTION1", "ACTION2"])
+
+        self.assertTrue(agent._should_force_counterfactual_exploration())
+
 
 if __name__ == "__main__":
     unittest.main()
