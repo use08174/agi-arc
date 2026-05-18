@@ -108,6 +108,13 @@ def main() -> None:
         print("known_states=", len(agent.graph.nodes))
         print(f"llm_enabled={llm_config.enabled}")
         print(f"llm_provider={llm_config.provider}")
+        if agent.decision_traces:
+            print("recent_decisions=")
+            for trace in agent.decision_traces[-12:]:
+                print(
+                    f"- step={trace.step_idx} state={trace.state_key} action={trace.action.key} "
+                    f"source={trace.source} reason={trace.reason}"
+                )
         if args.llm_show_trace and llm_config.enabled:
             for trace in agent.llm.recent_traces()[-llm_config.trace_print_limit :]:
                 print(f"llm_trace_step={trace.step_idx} state={trace.state_key}")

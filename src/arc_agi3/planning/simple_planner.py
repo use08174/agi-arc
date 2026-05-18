@@ -105,6 +105,9 @@ class SimplePlanner:
             return []
         world = game_memory.world_model
         if experiment.kind in {"collect_item", "activate_button", "go_to_goal"} and isinstance(experiment.target, tuple):
+            direct = self._direct_action_for_target(experiment.target, actions)
+            if direct is not None and experiment.kind in {"collect_item", "activate_button"}:
+                return [PlanStep(action=direct, reason=f"executing experiment {experiment.key} via direct interaction")]
             path = self.path_planner.plan_to_targets(world, actions, {experiment.target})
             if path:
                 return [PlanStep(action=path[0], reason=f"executing experiment {experiment.key}")]
@@ -122,6 +125,9 @@ class SimplePlanner:
         if experiment.kind == "inspect_affordance" and isinstance(experiment.target, dict):
             center = experiment.target.get("center")
             if isinstance(center, tuple):
+                direct = self._direct_action_for_target(center, actions)
+                if direct is not None:
+                    return [PlanStep(action=direct, reason=f"executing experiment {experiment.key} via direct interaction")]
                 path = self.path_planner.plan_to_targets(world, actions, {center})
                 if path:
                     return [PlanStep(action=path[0], reason=f"executing experiment {experiment.key}")]
@@ -130,3 +136,12 @@ class SimplePlanner:
                 if action.key == experiment.target:
                     return [PlanStep(action=action, reason=f"executing experiment {experiment.key}")]
         return []
+
+    def _direct_action_for_target(self, target: tuple[int, int], actions: list[Action]) -> Action | None:
+        tx, ty = target
+        for action in actions:
+            if action.name != "ACTION6" or not action.payload:
+                continue
+            if int(action.payload.get("x", -999)) == tx and int(action.payload.get("y", -999)) == ty:
+                return action
+        return None

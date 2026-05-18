@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import deque
 
 from arc_agi3.core.config import AgentConfig, LLMConfig
-from arc_agi3.core.types import Observation
+from arc_agi3.core.types import DecisionTrace, Observation
 from arc_agi3.exploration.frontier import FrontierExplorer
 from arc_agi3.llm.factory import build_llm_provider
 from arc_agi3.llm.manager import LLMHookManager
@@ -34,6 +34,7 @@ class ArcAgentRuntime:
         self.recent_actions: deque[str] = deque(
             maxlen=self.config.budget.recent_action_window
         )
+        self.decision_traces: list[DecisionTrace] = []
         self.steps_since_new_state = 0
         self.steps_since_semantic_progress = 0
 
@@ -42,6 +43,7 @@ class ArcAgentRuntime:
         self.previous_observation = None
         self.recent_states = deque(maxlen=self.config.budget.recent_state_window)
         self.recent_actions = deque(maxlen=self.config.budget.recent_action_window)
+        self.decision_traces = []
         self.steps_since_new_state = 0
         self.steps_since_semantic_progress = 0
         self.llm.reset_episode()

@@ -47,6 +47,19 @@ class ExperimentTest(unittest.TestCase):
 
         self.assertEqual(plan[0].action.name, "ACTION1")
 
+    def test_collect_experiment_prefers_direct_click_when_available(self) -> None:
+        memory = GameMemory()
+        proposal = ExperimentProposal(key="collect_item:2,0", kind="collect_item", target=(2, 0))
+        click = Action(name="ACTION6", payload={"x": 2, "y": 0})
+
+        plan = SimplePlanner().build_experiment_plan(
+            proposal,
+            [Action(name="ACTION1"), click],
+            memory,
+        )
+
+        self.assertEqual(plan[0].action.key, "ACTION6|x=2,y=0")
+
     def test_confirmed_collection_experiment_updates_hypothesis_family(self) -> None:
         world = WorldModel()
         manager = ExperimentManager(

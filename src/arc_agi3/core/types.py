@@ -104,6 +104,15 @@ class LLMDecisionTrace:
 
 
 @dataclass(slots=True)
+class DecisionTrace:
+    step_idx: int
+    state_key: str
+    action: Action
+    source: str
+    reason: str
+
+
+@dataclass(slots=True)
 class ActionSemanticProfile:
     action_key: str
     action_name: str

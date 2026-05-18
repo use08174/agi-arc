@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from arc_agi3.agents.base import ArcAgentRuntime
 from arc_agi3.agents.env_understanding_agent import EnvUnderstandingAgent
-from arc_agi3.core.types import Action, Observation, Transition
+from arc_agi3.core.types import Action, DecisionTrace, Observation, Transition
 from arc_agi3.envs.base import ArcEnvironment
 from arc_agi3.planning.safety_shield import SafetyShield
 
@@ -120,14 +120,15 @@ class GraphSearchAgent(ArcAgentRuntime):
                 recent_action_names=list(self.recent_actions),
             )
             if counterfactual is not None:
-                return counterfactual
+                return self._trace_decision(step_idx, observation, counterfactual, "counterfactual", "breaking repetitive low-progress action loop")
         experiment_plan = self.planner.build_experiment_plan(
             experiment=self.game_memory.experiments.active,
             actions=actions,
             game_memory=self.game_memory,
         )
         if experiment_plan:
-            return experiment_plan[0].action
+            step = experiment_plan[0]
+            return self._trace_decision(step_idx, observation, step.action, "experiment", step.reason)
         if not force_exploration:
             plan = self.planner.build_plan(
                 observation=observation,
@@ -137,7 +138,8 @@ class GraphSearchAgent(ArcAgentRuntime):
                 recent_states=set(self.recent_states),
             )
             if plan:
-                return plan[0].action
+                step = plan[0]
+                return self._trace_decision(step_idx, observation, step.action, "planner", step.reason)
         action = self.explorer.choose_action(
             observation=observation,
             actions=actions,
@@ -147,7 +149,21 @@ class GraphSearchAgent(ArcAgentRuntime):
             force_exploration=force_exploration,
         )
         if action is None:
-            return self._fallback_action(observation, actions)
+            fallback = self._fallback_action(observation, actions)
+            return self._trace_decision(step_idx, observation, fallback, "fallback", "no ranked frontier action")
+        return self._trace_decision(step_idx, observation, action, "explorer", "frontier selection")
+
+    def _trace_decision(self, step_idx: int, observation: Observation, action: Action, source: str, reason: str) -> Action:
+        self.decision_traces.append(
+            DecisionTrace(
+                step_idx=step_idx,
+                state_key=observation.state_key,
+                action=action,
+                source=source,
+                reason=reason,
+            )
+        )
+        del self.decision_traces[:-64]
         return action
 
     def _should_force_counterfactual_exploration(self) -> bool:
