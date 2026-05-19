@@ -165,6 +165,8 @@ class GraphSearchAgent(ArcAgentRuntime):
     def _choose_action(self, step_idx: int, observation: Observation, actions: list[Action]) -> Action:
         actions = self._filter_useless_actions(observation, actions)
         force_exploration = self._should_force_exploration(step_idx, observation)
+        actions = self._prefer_unseen_actions(observation, actions, force_exploration)
+        self._activate_experiment_if_idle(observation, actions, force_exploration)
         experiment_plan = self.planner.build_experiment_plan(
             experiment=self.game_memory.experiments.active,
             actions=actions,
@@ -213,6 +215,64 @@ class GraphSearchAgent(ArcAgentRuntime):
             fallback = self._fallback_action(observation, actions)
             return self._trace_decision(step_idx, observation, fallback, "fallback", "no ranked frontier action")
         return self._trace_decision(step_idx, observation, action, "explorer", "frontier selection")
+
+    def _prefer_unseen_actions(self, observation: Observation, actions: list[Action], force_exploration: bool) -> list[Action]:
+        if not actions:
+            return actions
+        current_node = self.graph.nodes.get(observation.state_key)
+        if current_node is None or not current_node.outgoing:
+            return actions
+        revisit_count = sum(1 for state in self.recent_states if state == observation.state_key)
+        if not force_exploration and revisit_count < 2:
+            return actions
+        unseen = [action for action in actions if self.graph.seen_successor(observation.state_key, action) is None]
+        return unseen or actions
+
+    def _activate_experiment_if_idle(self, observation: Observation, actions: list[Action], force_exploration: bool) -> None:
+        if self.game_memory.experiments.active is not None or not actions:
+            return
+        current_node = self.graph.nodes.get(observation.state_key)
+        seen_action_keys = set(current_node.outgoing) if current_node is not None else set()
+        proposals = self.game_memory.experiments.available(
+            self.game_memory.world_model,
+            actions,
+            seen_action_keys,
+        )
+        if not proposals:
+            return
+        selected = self._select_experiment(proposals, force_exploration)
+        if selected is None:
+            return
+        self.game_memory.experiments.activate(selected)
+
+    def _select_experiment(self, proposals, force_exploration: bool):
+        world = self.game_memory.world_model
+        known_axes = {
+            axis
+            for dx, dy in world.action_move_vectors.values()
+            for axis in (
+                "horizontal" if dx != 0 else "",
+                "vertical" if dy != 0 else "",
+            )
+            if axis
+        }
+
+        def priority(proposal) -> tuple:
+            kind = proposal.kind
+            if kind == "discover_axis":
+                axis = str((proposal.target or {}).get("axis", ""))
+                return (0, axis in known_axes, proposal.key)
+            if kind == "probe_action":
+                return (1 if force_exploration else 2, proposal.key)
+            if kind == "inspect_affordance":
+                return (3, -float(proposal.confidence or 0.0), proposal.key)
+            if kind in {"collect_item", "activate_button", "go_to_goal"}:
+                return (4, proposal.key)
+            if kind == "inspect_relation":
+                return (5, proposal.key)
+            return (6, proposal.key)
+
+        return sorted(proposals, key=priority)[0] if proposals else None
 
     def _trace_decision(self, step_idx: int, observation: Observation, action: Action, source: str, reason: str) -> Action:
         self.decision_traces.append(
@@ -283,6 +343,8 @@ class GraphSearchAgent(ArcAgentRuntime):
                 continue
             if action.name in self.game_memory.undo_like_action_names or action.key in self.game_memory.undo_like_action_keys:
                 continue
+            if action.key in self.game_memory.dangerous_action_keys:
+                continue
             if self.game_memory.world_model.is_unsafe_action(action):
                 continue
             if self.graph.action_is_probably_useless(observation.state_key, action):
@@ -337,6 +399,8 @@ class GraphSearchAgent(ArcAgentRuntime):
             if action.name in self.game_memory.restart_like_action_names or action.key in self.game_memory.restart_like_action_keys:
                 continue
             if action.name in self.game_memory.undo_like_action_names or action.key in self.game_memory.undo_like_action_keys:
+                continue
+            if action.key in self.game_memory.dangerous_action_keys:
                 continue
             if self.game_memory.world_model.is_unsafe_action(action):
                 continue

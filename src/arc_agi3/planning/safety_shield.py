@@ -37,8 +37,7 @@ class SafetyShield:
             return False
         if action.name in game_memory.undo_like_action_names or action.key in game_memory.undo_like_action_keys:
             return False
-        if action.payload and action.key in game_memory.dangerous_action_keys:
-            # Coordinate clicks are specific enough to blacklist globally.
+        if action.key in game_memory.dangerous_action_keys:
             return False
         if world.is_unsafe_action(action):
             return False

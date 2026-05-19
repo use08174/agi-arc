@@ -42,6 +42,36 @@ class ExplorationPressureTest(unittest.TestCase):
 
         self.assertEqual(action.name, "ACTION4")
 
+    def test_revisited_state_prefers_unseen_actions_during_exploration(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        observation = Observation(state_key="s0", frame=None, changed=True)  # type: ignore[arg-type]
+        agent.graph.touch("s0")
+        agent.graph.nodes["s0"].outgoing["ACTION1"] = "s1"
+        agent.recent_states.extend(["s0", "s0"])
+
+        filtered = agent._prefer_unseen_actions(
+            observation,
+            [Action(name="ACTION1"), Action(name="ACTION2"), Action(name="ACTION3")],
+            force_exploration=True,
+        )
+
+        self.assertEqual([action.name for action in filtered], ["ACTION2", "ACTION3"])
+
+    def test_idle_agent_activates_axis_discovery_experiment(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        observation = Observation(state_key="s0", frame=None, changed=True, notes={})  # type: ignore[arg-type]
+        agent.game_memory.world_model.player_pos = (1, 1)
+        agent.game_memory.world_model.visible_goal_cells = {(1, 4)}
+
+        agent._activate_experiment_if_idle(
+            observation,
+            [Action(name="ACTION1"), Action(name="ACTION2")],
+            force_exploration=True,
+        )
+
+        self.assertIsNotNone(agent.game_memory.experiments.active)
+        self.assertEqual(agent.game_memory.experiments.active.kind, "discover_axis")
+
 
 if __name__ == "__main__":
     unittest.main()

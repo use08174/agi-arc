@@ -22,6 +22,16 @@ class FrontierExplorer:
         force_exploration: bool = False,
     ) -> Action | None:
         world = game_memory.world_model
+        known_axes = {
+            axis
+            for dx, dy in world.action_move_vectors.values()
+            for axis in (
+                "horizontal" if dx != 0 else "",
+                "vertical" if dy != 0 else "",
+            )
+            if axis
+        }
+        needs_axis_discovery = len(known_axes) < 2
         ranked = []
         for index, action in enumerate(actions):
             if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
@@ -53,11 +63,18 @@ class FrontierExplorer:
             if action.name == "ACTION6" and action.payload:
                 xy = (int(action.payload.get("x", -999)), int(action.payload.get("y", -999)))
                 click_target_preferred = xy in world.preferred_click_targets(limit=12)
+            movement_discovery_candidate = (
+                needs_axis_discovery
+                and not action.payload
+                and meaning_uses_below_threshold(profile.uses)
+                and action.name not in world.action_move_vectors
+            )
             ranked.append(
                 (
                     terminal_loss,
                     learned_label in {"restart_like", "undo_like", "hud_only"} and learned_confidence >= 0.6,
                     blocked,
+                    not movement_discovery_candidate,
                     not unseen_from_state if force_exploration else False,
                     globally_noop and not unseen_from_state,
                     loops_recent,
@@ -118,3 +135,7 @@ class FrontierExplorer:
             return None
         ranked.sort(key=lambda item: item[:-1])
         return ranked[0][-1]
+
+
+def meaning_uses_below_threshold(uses: int, limit: int = 2) -> bool:
+    return uses < limit
