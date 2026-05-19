@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from arc_agi3.core.config import AgentConfig
-from arc_agi3.core.types import Action, Observation, RankedAction
+from arc_agi3.core.types import Action, Observation
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.memory.state_graph import StateGraph
 
@@ -80,51 +80,6 @@ class FrontierExplorer:
             ranked.sort(key=lambda item: item[:-1])
             return ranked[0][-1]
         return None
-
-    def reorder_with_rankings(
-        self,
-        observation: Observation,
-        actions: list[Action],
-        ranked_actions: list[RankedAction],
-        graph: StateGraph,
-        game_memory: GameMemory,
-        force_exploration: bool = False,
-    ) -> list[Action]:
-        if not ranked_actions:
-            return actions
-        world = game_memory.world_model
-        score_by_key = {item.action.key: item.score for item in ranked_actions}
-        index_by_key = {item.action.key: idx for idx, item in enumerate(ranked_actions)}
-
-        def bucket(action: Action) -> tuple:
-            unsafe = world.is_unsafe_action(action)
-            blocked = world.is_blocked_action(action)
-            restart_like = action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys
-            undo_like = action.name in game_memory.undo_like_action_names or action.key in game_memory.undo_like_action_keys
-            learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
-            successor = graph.seen_successor(observation.state_key, action)
-            unseen = successor is None
-            score = -score_by_key.get(action.key, 0.0)
-            rank_index = index_by_key.get(action.key, 10**6)
-            if restart_like:
-                return (10, rank_index, action.key)
-            if undo_like:
-                return (9, rank_index, action.key)
-            if learned_label in {"restart_like", "undo_like", "hud_only"} and learned_confidence >= 0.6:
-                return (8, rank_index, action.key)
-            if unsafe:
-                return (9, rank_index, action.key)
-            if blocked:
-                return (7, rank_index, action.key)
-            if unseen and force_exploration:
-                return (0, score, rank_index, action.key)
-            if action.key in game_memory.promising_action_keys:
-                return (1, score, rank_index, action.key)
-            if unseen:
-                return (2, score, rank_index, action.key)
-            return (3, score, rank_index, action.key)
-
-        return sorted(actions, key=bucket)
 
     def choose_counterfactual_action(
         self,

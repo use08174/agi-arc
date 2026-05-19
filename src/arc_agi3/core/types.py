@@ -60,13 +60,6 @@ class PlanStep:
 
 
 @dataclass(slots=True)
-class RankedAction:
-    action: Action
-    score: float
-    reason: str
-
-
-@dataclass(slots=True)
 class RuleHypothesis:
     summary: str
     confidence: float
@@ -90,28 +83,6 @@ class ExperimentOutcome:
     proposal: ExperimentProposal
     status: str
     evidence: str
-
-
-@dataclass(slots=True)
-class LLMDirective:
-    goal_key: str = ""
-    goal_summary: str = ""
-    preferred_action: Action | None = None
-    avoid_action_keys: list[str] = field(default_factory=list)
-    commitment_steps: int = 0
-    confidence: float = 0.0
-
-
-@dataclass(slots=True)
-class LLMDecisionTrace:
-    step_idx: int
-    state_key: str
-    prompt: str
-    raw_response: str
-    ranked_actions: list[RankedAction] = field(default_factory=list)
-    hypotheses: list[RuleHypothesis] = field(default_factory=list)
-    next_test: ExperimentProposal | None = None
-    directive: LLMDirective | None = None
 
 
 @dataclass(slots=True)

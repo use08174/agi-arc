@@ -18,14 +18,16 @@ class HypothesisFamily:
         self.confidence = self.prior
 
     def support(self, amount: float, evidence: str) -> None:
+        if evidence in self.evidence:
+            return
         self.confidence = min(1.0, self.confidence + amount)
-        if evidence not in self.evidence:
-            self.evidence.append(evidence)
+        self.evidence.append(evidence)
 
     def contradict(self, amount: float, evidence: str) -> None:
+        if evidence in self.contradictions:
+            return
         self.confidence = max(0.0, self.confidence - amount)
-        if evidence not in self.contradictions:
-            self.contradictions.append(evidence)
+        self.contradictions.append(evidence)
 
     def preferred_subgoals(self, world: Any) -> list[dict[str, Any]]:
         return []

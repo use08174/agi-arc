@@ -15,25 +15,25 @@ class StateHasher:
         self.map_parser = MapParser()
 
     def observe(self, frame: Frame, previous: Frame | None = None) -> Observation:
-        hud_rows = self._hud_rows(frame)
-        semantic = self.map_parser.parse(frame, previous=previous, hud_rows=hud_rows)
+        semantic = self.map_parser.parse(frame, previous=previous)
+        hud_rows = semantic.hud_rows
         semantic_notes = semantic.to_notes()
-        playfield_grid = self._playfield_grid(frame)
+        full_grid = self._grid_signature(frame)
 
-        # Hash world-relevant state, not the action counter/HUD.
+        # Keep the full grid in the state key. HUD guesses are too uncertain to crop aggressively.
         semantic_signature = (
             tuple(sorted((obj.get("color"), obj.get("shape_signature"), _bbox_tuple(obj.get("bbox"))) for obj in semantic.items[:16])),
             _bbox_tuple(semantic.player.get("bbox")) if semantic.player else None,
             frame.info.get("levels_completed", 0),
             frame.status.value,
         )
-        encoded = repr((playfield_grid, semantic_signature)).encode("utf-8")
+        encoded = repr((full_grid, semantic_signature)).encode("utf-8")
         state_key = hashlib.sha1(encoded).hexdigest()[:12]
 
         if previous is None:
             changed = True
         else:
-            changed = self._playfield_grid(previous) != playfield_grid
+            changed = self._grid_signature(previous) != full_grid
 
         nonzero_count = sum(1 for row in frame.grid for value in row if value != 0)
         colors = sorted({int(value) for row in frame.grid for value in row if value != 0})
@@ -50,6 +50,7 @@ class StateHasher:
             "nonzero_count": nonzero_count,
             "unique_colors": colors,
             "hud_rows_hint": hud_rows,
+            "hud_confidence_hint": semantic.hud_confidence,
             "hud_nonzero_count": hud_nonzero_count,
             "playfield_nonzero_count": nonzero_count - hud_nonzero_count,
         }
@@ -60,21 +61,12 @@ class StateHasher:
             notes.update(self._semantic_diff_notes(previous, frame, hud_rows))
         return Observation(state_key=state_key, frame=frame, changed=changed, notes=notes)
 
-    def _playfield_grid(self, frame: Frame) -> tuple[tuple[int, ...], ...]:
-        grid = frame.grid
-        if not grid:
-            return grid
-        hud_rows = self._hud_rows(frame)
-        if hud_rows <= 0:
-            return grid
-        cutoff = max(0, len(grid) - hud_rows)
-        return tuple(tuple(int(value) for value in row) for row in grid[:cutoff])
+    def _grid_signature(self, frame: Frame) -> tuple[tuple[int, ...], ...]:
+        return tuple(tuple(int(value) for value in row) for row in frame.grid)
 
     def _hud_rows(self, frame: Frame) -> int:
-        height = len(frame.grid)
-        if height < 4:
-            return 0
-        return max(2, min(8, height // 6))
+        hud_rows, _ = self.map_parser._infer_hud_rows(frame)
+        return hud_rows
 
     def _region_notes(self, frame: Frame, hud_rows: int) -> dict[str, object]:
         regions = self._extract_regions(frame, hud_rows)

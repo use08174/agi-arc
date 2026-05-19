@@ -288,11 +288,18 @@ class ExperimentManager:
     def _button_tests_are_supported(self, world: Any) -> bool:
         if not world.visible_button_cells:
             return False
-        if world.hypothesis_library.confidence("switch_opens_path") >= 0.18:
+        switch_family = world.hypothesis_library.families.get("switch_opens_path")
+        direct_switch_evidence = False
+        if switch_family is not None:
+            direct_switch_evidence = any(
+                "caused" in evidence or "interaction_hint=" in evidence
+                for evidence in switch_family.evidence
+            )
+        if direct_switch_evidence and world.hypothesis_library.confidence("switch_opens_path") >= 0.28:
             return True
         for track in world.likely_interactable_tracks():
             affordance, confidence = track.best_affordance
-            if affordance == "door_candidate" and confidence >= 0.18:
+            if affordance == "door_candidate" and confidence >= 0.24:
                 return True
         return False
 

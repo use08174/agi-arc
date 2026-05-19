@@ -48,15 +48,17 @@ class ActionSemanticsTest(unittest.TestCase):
         self.assertIn("playfield", profile.dominant_regions)
         self.assertIn("spawn_or_unlock", profile.interaction_hints)
 
-    def test_hasher_marks_bottom_band_as_hud(self) -> None:
+    def test_hasher_keeps_bottom_band_in_state_on_small_board(self) -> None:
         hasher = StateHasher()
         previous = Frame(grid=((0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0)), status=GameStatus.IN_PROGRESS)
         current = Frame(grid=((0, 0), (0, 0), (0, 0), (0, 0), (1, 0), (0, 0)), status=GameStatus.IN_PROGRESS)
 
-        observation = hasher.observe(current, previous=previous)
+        previous_observation = hasher.observe(previous)
+        current_observation = hasher.observe(current, previous=previous)
 
-        self.assertEqual(observation.notes["region_bias"], "hud")
-        self.assertEqual(observation.notes["interaction_hint"], "hud_or_counter_update")
+        self.assertEqual(current_observation.notes["semantic_hud_rows"], 0)
+        self.assertNotEqual(previous_observation.state_key, current_observation.state_key)
+        self.assertEqual(current_observation.notes["region_bias"], "playfield")
 
     def test_hasher_extracts_repeated_motifs_and_anchor_regions(self) -> None:
         hasher = StateHasher()
@@ -83,6 +85,21 @@ class ActionSemanticsTest(unittest.TestCase):
         self.assertTrue(any(item["anchor"] == "bottom_left" for item in patches))
         self.assertTrue(any(item["anchor"] == "bottom_right" for item in patches))
         self.assertTrue(observation.notes["collectible_candidates"])
+
+    def test_parser_detects_strong_bottom_panel_as_hud(self) -> None:
+        parser = MapParser()
+        frame = Frame(
+            grid=tuple(
+                tuple(8 if y >= 14 else 0 for _ in range(16))
+                for y in range(16)
+            ),
+            status=GameStatus.IN_PROGRESS,
+        )
+
+        semantic = parser.parse(frame)
+
+        self.assertGreaterEqual(semantic.hud_rows, 2)
+        self.assertGreaterEqual(semantic.hud_confidence, 0.65)
 
     def test_small_anchor_patch_flash_is_marked_as_feedback(self) -> None:
         hasher = StateHasher()

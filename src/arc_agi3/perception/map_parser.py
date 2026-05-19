@@ -13,27 +13,33 @@ class SemanticMap:
     width: int
     height: int
     hud_rows: int
+    hud_confidence: float
     objects: list[dict[str, Any]]
     player: dict[str, Any] | None
     walls: list[dict[str, Any]]
     items: list[dict[str, Any]]
     goals: list[dict[str, Any]]
     buttons: list[dict[str, Any]]
+    displays: list[dict[str, Any]]
     hazards: list[dict[str, Any]]
     ascii_map: str
 
     def to_notes(self) -> dict[str, Any]:
+        role_counts = Counter(str(obj.get("role", "unknown")) for obj in self.objects)
         return {
             "semantic_width": self.width,
             "semantic_height": self.height,
             "semantic_hud_rows": self.hud_rows,
+            "semantic_hud_confidence": self.hud_confidence,
             "semantic_objects": self.objects[:24],
             "semantic_player": self.player,
             "semantic_walls": self.walls[:16],
             "semantic_items": self.items[:16],
             "semantic_goals": self.goals[:8],
             "semantic_buttons": self.buttons[:8],
+            "semantic_displays": self.displays[:8],
             "semantic_hazards": self.hazards[:8],
+            "semantic_role_counts": dict(role_counts),
             "semantic_ascii_map": self.ascii_map,
         }
 
@@ -50,31 +56,72 @@ class MapParser:
         grid = frame.grid
         height = len(grid)
         width = len(grid[0]) if height else 0
-        hud_rows = self._hud_rows(frame) if hud_rows is None else hud_rows
+        inferred_hud_rows, hud_confidence = self._infer_hud_rows(frame)
+        if hud_rows is None:
+            hud_rows = inferred_hud_rows
+        else:
+            hud_confidence = 1.0 if hud_rows > 0 else 0.0
         hud_start = max(0, height - hud_rows)
         objects = self._extract_components(frame, hud_rows)
         player = self._infer_player(objects, frame, previous, hud_rows)
-        walls, items, goals, buttons, hazards = self._classify(objects, player, width, hud_start)
-        ascii_map = self._ascii(width, hud_start, objects, player, walls, items, goals, buttons, hazards)
+        walls, items, goals, buttons, displays, hazards = self._classify(objects, player, width, height, hud_start)
+        ascii_map = self._ascii(width, height, player, walls, items, goals, buttons, displays, hazards)
         return SemanticMap(
             width=width,
-            height=hud_start,
+            height=height,
             hud_rows=hud_rows,
+            hud_confidence=hud_confidence,
             objects=objects,
             player=player,
             walls=walls,
             items=items,
             goals=goals,
             buttons=buttons,
+            displays=displays,
             hazards=hazards,
             ascii_map=ascii_map,
         )
 
-    def _hud_rows(self, frame: Frame) -> int:
+    def _infer_hud_rows(self, frame: Frame) -> tuple[int, float]:
         height = len(frame.grid)
-        if height < 4:
-            return 0
-        return max(2, min(8, height // 6))
+        width = len(frame.grid[0]) if height else 0
+        if height < 8 or width < 8:
+            return 0, 0.0
+
+        max_rows = min(8, max(0, height // 4))
+        if max_rows <= 0:
+            return 0, 0.0
+
+        streak = 0
+        score = 0.0
+        for offset in range(1, max_rows + 1):
+            row = frame.grid[height - offset]
+            nonzero = sum(1 for value in row if int(value) != 0)
+            if nonzero == 0:
+                break
+            fill_ratio = nonzero / max(1, width)
+            colors = {int(value) for value in row if int(value) != 0}
+            edge_run = self._edge_run_length(row)
+            row_score = 0.0
+            if fill_ratio >= 0.5:
+                row_score += 0.45
+            if len(colors) <= 2:
+                row_score += 0.20
+            if edge_run >= max(4, width // 4):
+                row_score += 0.20
+            if offset < height and row == frame.grid[height - offset - 1]:
+                row_score += 0.15
+            if row_score < 0.55:
+                break
+            streak += 1
+            score += row_score
+
+        if streak < 2:
+            return 0, 0.0
+        confidence = min(0.95, score / streak)
+        if confidence < 0.65:
+            return 0, confidence
+        return streak, confidence
 
     def _extract_components(self, frame: Frame, hud_rows: int) -> list[dict[str, Any]]:
         grid = frame.grid
@@ -121,10 +168,15 @@ class MapParser:
                         "cells": cells[:64],
                         "bbox": bbox,
                         "area": len(cells),
+                        "center": _center(bbox),
                         "shape_signature": hashlib.sha1(repr(shape).encode("utf-8")).hexdigest()[:10],
                         "anchor": _anchor_name(min_x, min_y, max_x, max_y, width, hud_start),
+                        "region": "hud" if min_y >= hud_start else "playfield",
+                        "touches_edge": min_x == 0 or min_y == 0 or max_x >= width - 1 or max_y >= max(0, hud_start - 1),
+                        "elongated": (max_x - min_x + 1) >= max(6, width // 4) or (max_y - min_y + 1) >= max(6, max(1, hud_start) // 4),
                         "role": "unknown",
                         "confidence": 0.0,
+                        "role_reason": "unclassified",
                     }
                 )
         out.sort(key=lambda item: (-int(item["area"]), item["bbox"]["min_y"], item["bbox"]["min_x"]))
@@ -152,15 +204,28 @@ class MapParser:
                 player = min(candidates, key=lambda item: item[0])[1].copy()
                 player["role"] = "player"
                 player["confidence"] = 0.75
+                player["role_reason"] = "matched moving component with stable color/shape"
                 return player
-        # Fallback: a small component away from edges often represents the avatar.
-        compact = [obj for obj in objects if 1 <= int(obj["area"]) <= 16]
+        # Fallback: prefer small, non-edge, non-bottom compact components near the center.
+        playfield_height = max(1, len(frame.grid) - hud_rows)
+        center_x = (len(frame.grid[0]) - 1) / 2 if frame.grid else 0.0
+        center_y = (playfield_height - 1) / 2
+        compact = [obj for obj in objects if 1 <= int(obj["area"]) <= 16 and str(obj.get("region")) == "playfield"]
         if not compact:
             return None
-        compact.sort(key=lambda obj: (obj["bbox"]["min_y"], obj["bbox"]["min_x"]))
+        compact.sort(
+            key=lambda obj: (
+                bool(obj.get("touches_edge", False)),
+                str(obj.get("anchor", "")).startswith("bottom_"),
+                abs(float(obj["center"][0]) - center_x) + abs(float(obj["center"][1]) - center_y),
+                obj["bbox"]["min_y"],
+                obj["bbox"]["min_x"],
+            )
+        )
         player = compact[0].copy()
         player["role"] = "player_candidate"
-        player["confidence"] = 0.35
+        player["confidence"] = 0.45 if not player.get("touches_edge", False) else 0.30
+        player["role_reason"] = "small interior component chosen as avatar candidate"
         return player
 
     def _classify(
@@ -169,11 +234,13 @@ class MapParser:
         player: dict[str, Any] | None,
         width: int,
         height: int,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        hud_start: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         walls: list[dict[str, Any]] = []
         items: list[dict[str, Any]] = []
         goals: list[dict[str, Any]] = []
         buttons: list[dict[str, Any]] = []
+        displays: list[dict[str, Any]] = []
         hazards: list[dict[str, Any]] = []
         shape_counts = Counter(str(obj.get("shape_signature")) for obj in objects)
         player_id = player.get("id") if player else None
@@ -183,45 +250,60 @@ class MapParser:
                 continue
             bbox = obj["bbox"]
             area = int(obj["area"])
-            touches_edge = bbox["min_x"] == 0 or bbox["min_y"] == 0 or bbox["max_x"] >= width - 1 or bbox["max_y"] >= height - 1
-            long_bar = bbox["width"] >= max(6, width // 4) or bbox["height"] >= max(6, height // 4)
+            touches_edge = bool(obj.get("touches_edge", False))
+            long_bar = bool(obj.get("elongated", False))
             repeated = shape_counts[str(obj.get("shape_signature"))] >= 2
             anchor = str(obj.get("anchor", "middle_center"))
-            if touches_edge or long_bar or area >= max(20, width * height // 18):
+            region = str(obj.get("region", "playfield"))
+            near_bottom = bbox["max_y"] >= max(0, height - max(3, height // 6))
+            aspect = max(bbox["width"], bbox["height"]) / max(1, min(bbox["width"], bbox["height"]))
+            if touches_edge or long_bar or area >= max(20, width * max(1, hud_start) // 18):
                 obj["role"] = "wall"
-                obj["confidence"] = 0.55
+                obj["confidence"] = 0.55 if region == "playfield" else 0.35
+                obj["role_reason"] = "large or boundary-touching structure"
                 walls.append(obj)
-            elif anchor.startswith("bottom_") and area <= 32:
+            elif region == "hud" or (anchor.startswith("bottom_") and near_bottom and area <= 32 and aspect >= 1.0):
                 obj["role"] = "display_candidate"
-                obj["confidence"] = 0.30
+                obj["confidence"] = 0.45 if region == "hud" else 0.32
+                obj["role_reason"] = "bottom-anchored compact structure likely to be display/panel"
+                displays.append(obj)
             elif area <= 12 and repeated:
                 obj["role"] = "item"
                 obj["confidence"] = 0.55
+                obj["role_reason"] = "small repeated motif likely to be collectible or token"
                 items.append(obj)
-            elif area <= 16:
+            elif area <= 10 and not touches_edge:
                 obj["role"] = "item"
-                obj["confidence"] = 0.35
+                obj["confidence"] = 0.38
+                obj["role_reason"] = "small interior object"
                 items.append(obj)
-            elif area <= 32:
+            elif area <= 24 and near_bottom:
                 obj["role"] = "button"
-                obj["confidence"] = 0.25
+                obj["confidence"] = 0.28
+                obj["role_reason"] = "near-bottom interactable candidate"
                 buttons.append(obj)
+            elif area <= 14 and not repeated and not touches_edge:
+                obj["role"] = "goal"
+                obj["confidence"] = 0.24
+                obj["role_reason"] = "small distinct interior target candidate"
+                goals.append(obj)
             else:
                 obj["role"] = "goal"
                 obj["confidence"] = 0.20
+                obj["role_reason"] = "remaining salient non-wall object treated as goal candidate"
                 goals.append(obj)
-        return walls, items, goals, buttons, hazards
+        return walls, items, goals, buttons, displays, hazards
 
     def _ascii(
         self,
         width: int,
         height: int,
-        objects: list[dict[str, Any]],
         player: dict[str, Any] | None,
         walls: list[dict[str, Any]],
         items: list[dict[str, Any]],
         goals: list[dict[str, Any]],
         buttons: list[dict[str, Any]],
+        displays: list[dict[str, Any]],
         hazards: list[dict[str, Any]],
     ) -> str:
         if width <= 0 or height <= 0:
@@ -250,6 +332,8 @@ class MapParser:
             mark(obj, "G")
         for obj in buttons:
             mark(obj, "B")
+        for obj in displays:
+            mark(obj, "D")
         for obj in items:
             mark(obj, "i")
         for obj in hazards:
@@ -257,6 +341,17 @@ class MapParser:
         if player is not None:
             mark(player, "P")
         return "\n".join("".join(row) for row in canvas)
+
+    def _edge_run_length(self, row: tuple[int, ...]) -> int:
+        best = 0
+        current = 0
+        for value in row:
+            if int(value) != 0:
+                current += 1
+                best = max(best, current)
+            else:
+                current = 0
+        return best
 
 
 def _center(bbox: dict[str, Any]) -> tuple[int, int]:

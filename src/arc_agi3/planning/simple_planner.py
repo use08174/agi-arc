@@ -10,7 +10,7 @@ class SimplePlanner:
     """World-model aware planner.
 
     It first follows BFS paths to semantic targets, then falls back to promising
-    graph transitions. LLM still ranks candidates before this planner sees them.
+    graph transitions.
     """
 
     def __init__(self) -> None:

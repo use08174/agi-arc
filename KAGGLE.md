@@ -81,40 +81,6 @@ This prints:
 - `scorecard_url`
 - replay availability
 
-## Local LLM Hook On Kaggle
-
-Recommended first model choices for this repo:
-
-1. `Qwen2.5-Coder-1.5B-Instruct`
-2. `Qwen2.5-Coder-3B-Instruct`
-3. `Qwen2.5-7B-Instruct` only if you can tolerate slower calls
-
-These are best used for:
-
-- ranking a shortlist of candidate actions
-- proposing short rule hypotheses
-
-not for directly controlling every step.
-
-Example run with a local model mounted as Kaggle input:
-
-```python
-!python /kaggle/input/arc-agi3-starter/scripts/kaggle_local_llm_ls20.py \
-    --mode online \
-    --game-id ls20 \
-    --model-short-name qwen-coder-1.5b \
-    --llm-start-step 8 \
-    --llm-step-interval 8 \
-    --llm-max-calls 12
-```
-
-The current implementation already throttles calls by:
-
-- waiting until `start_step`
-- only calling every `step_interval` steps
-- capping calls per episode
-- caching decisions by state/action signature
-
 ## Re-check A Scorecard Later
 
 ```python
@@ -165,27 +131,6 @@ Optional environment variables for the adapter:
 ```python
 os.environ["ARC_AGI3_MAX_STEPS"] = "128"
 os.environ["ARC_AGI3_EXPLORE_STEPS"] = "24"
-os.environ["ARC_AGI3_LLM_ENABLED"] = "1"
-os.environ["ARC_AGI3_LLM_PROVIDER"] = "transformers_local"
-os.environ["ARC_AGI3_LLM_MODEL_PATH"] = "/kaggle/input/models/qwen-lm/qwen2.5-coder/transformers/3b-instruct/1"
-```
-
-If you prefer the CLI instead of the notebook, the local-LLM script now selects the
-official offline evaluator automatically when `--mode offline` is used:
-
-```python
-!python /kaggle/working/agi-arc/scripts/kaggle_local_llm_ls20.py \
-    --mode offline \
-    --game-id bp35 \
-    --model-short-name /kaggle/input/models/qwen-lm/qwen2.5-coder/transformers/3b-instruct/1 \
-    --max-steps 50 \
-    --explore-steps 5 \
-    --llm-start-step 8 \
-    --llm-step-interval 8 \
-    --llm-max-calls 100 \
-    --llm-control-mode directed \
-    --llm-thinking-mode brief \
-    --llm-show-trace
 ```
 
 Use `--game-id all` to evaluate every public offline environment in `environment_files`.

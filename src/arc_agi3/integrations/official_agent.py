@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from arc_agi3.agents.graph_agent import GraphSearchAgent
-from arc_agi3.core.config import AgentConfig, LLMConfig
+from arc_agi3.core.config import AgentConfig
 from arc_agi3.core.types import Action, Frame, GameStatus
 from arc_agi3.envs.action_expander import ActionExpander
 
@@ -18,17 +18,13 @@ except Exception:  # pragma: no cover - optional dependency
 class OfficialAgentPolicy:
     """Bridge the official frame-by-frame API to our graph agent runtime."""
 
-    def __init__(
-        self,
-        agent_config: AgentConfig | None = None,
-        llm_config: LLMConfig | None = None,
-    ) -> None:
-        self.runtime = GraphSearchAgent(config=agent_config, llm_config=llm_config)
+    def __init__(self, agent_config: AgentConfig | None = None) -> None:
+        self.runtime = GraphSearchAgent(config=agent_config)
         self.expander = ActionExpander(self.runtime.config.click_expansion)
         self.awaiting_fresh_episode = True
 
     def close(self) -> None:
-        self.runtime.close()
+        return
 
     def choose_action(self, latest_frame: FrameData) -> Any:
         if GameAction is None or GameState is None:

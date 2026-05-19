@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from arc_agi3.core.config import LLMConfig
 from arc_agi3.core.types import Action, ExperimentProposal, Transition
-from arc_agi3.llm.transformers_local import TransformersLocalProvider
 from arc_agi3.memory.experiments import ExperimentManager
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.memory.world_model import WorldModel
@@ -12,26 +10,6 @@ from arc_agi3.planning.simple_planner import SimplePlanner
 
 
 class ExperimentTest(unittest.TestCase):
-    def test_llm_parser_accepts_exact_next_test_key(self) -> None:
-        provider = TransformersLocalProvider(LLMConfig(enabled=True))
-        experiments = [
-            ExperimentProposal(
-                key="collect_item:2,3",
-                kind="collect_item",
-                target=(2, 3),
-                rationale="test collection",
-            )
-        ]
-        bundle = provider._parse_response(
-            '{"next_test":{"key":"collect_item:2,3","confidence":0.8,"reason":"most informative"},"ranked_actions":[]}',
-            [Action(name="ACTION1")],
-            experiments,
-        )
-
-        self.assertIsNotNone(bundle.next_test)
-        self.assertEqual(bundle.next_test.key, "collect_item:2,3")
-        self.assertEqual(bundle.next_test.source, "llm")
-
     def test_experiment_plan_routes_to_target(self) -> None:
         memory = GameMemory()
         memory.world_model.player_pos = (0, 0)
@@ -238,10 +216,24 @@ class ExperimentTest(unittest.TestCase):
     def test_button_experiment_requires_supporting_evidence(self) -> None:
         memory = GameMemory()
         memory.world_model.visible_button_cells = {(3, 4)}
+        for _ in range(5):
+            memory.world_model.hypothesis_library.observe_scene(memory.world_model)
 
         proposals = memory.experiments.available(memory.world_model, [Action(name="ACTION1")], set())
 
         self.assertFalse(any(proposal.kind == "activate_button" for proposal in proposals))
+
+    def test_button_experiment_allows_direct_switch_evidence(self) -> None:
+        memory = GameMemory()
+        memory.world_model.visible_button_cells = {(3, 4)}
+        memory.world_model.hypothesis_library.observe_transition(
+            memory.world_model,
+            {"interaction_hint": "spawn_or_unlock"},
+        )
+
+        proposals = memory.experiments.available(memory.world_model, [Action(name="ACTION1")], set())
+
+        self.assertTrue(any(proposal.kind == "activate_button" for proposal in proposals))
 
 
 if __name__ == "__main__":

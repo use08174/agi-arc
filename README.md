@@ -113,48 +113,6 @@ The real adapter uses the official `arc-agi` package and follows the current too
 
 Internally, the adapter converts ARC frames into our simpler `Frame` dataclass using the final rendered frame as the current state representation.
 
-## LLM Hook Design
-
-This repo now includes an optional LLM hook layer:
-
-- `llm/manager.py` builds compact decision context from the current graph state
-- `llm/prompting.py` creates a provider-neutral prompt
-- `llm/provider.py` defines the provider protocol
-- `llm/noop.py` keeps behavior unchanged when no model is configured
-
-The intended use is not "LLM chooses every move". Instead:
-
-1. The explorer/planner generates candidate actions
-2. The LLM ranks a shortlist and proposes rule hypotheses
-3. The symbolic policy still owns the final decision
-
-This keeps the core agent deterministic and debuggable while letting us add:
-
-- offline replay analysis
-- action ranking
-- rule-hypothesis generation
-- level-to-level memory summaries
-
-### Local Transformers Provider
-
-The repo now includes a local `transformers` provider:
-
-- `llm/transformers_local.py`
-- CLI flags in `runner/main.py`
-- Kaggle wrapper script: `scripts/kaggle_local_llm_ls20.py`
-
-Recommended first models:
-
-1. `Qwen2.5-Coder-1.5B-Instruct`
-2. `Qwen2.5-Coder-3B-Instruct`
-
-Recommended runtime pattern:
-
-- start LLM only after a few exploration steps
-- call it every N steps instead of every step
-- cap total LLM calls per episode
-- cache ranked-action outputs by `(state, candidates, recent transitions)`
-
 ## Score Checking
 
 Official scorecards and replay pages are available for API-backed runs. ARC docs note that:
