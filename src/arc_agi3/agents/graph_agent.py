@@ -35,6 +35,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         observation = self._external_observation
         action = self._choose_action(self._external_step_idx, observation, actions)
         action = self.safety_shield.validate_or_replace(action, observation, actions, self.game_memory)
+        self._print_action_trace(self._external_step_idx, observation, action)
         self._external_pending_action = action
         self._external_step_idx += 1
         return action
@@ -78,6 +79,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             actions = env.valid_actions()
             action = self._choose_action(step_idx, observation, actions)
             action = self.safety_shield.validate_or_replace(action, observation, actions, self.game_memory)
+            self._print_action_trace(step_idx, observation, action)
             result = env.step(action)
             next_observation = self._integrate_transition(
                 observation=observation,
@@ -224,6 +226,13 @@ class GraphSearchAgent(ArcAgentRuntime):
         )
         del self.decision_traces[:-64]
         return action
+
+    def _print_action_trace(self, step_idx: int, observation: Observation, action: Action) -> None:
+        source = self.decision_traces[-1].source if self.decision_traces else "unknown"
+        print(
+            f"action_step={step_idx} state={observation.state_key} "
+            f"action={action.key} source={source}"
+        )
 
     def _should_force_counterfactual_exploration(self) -> bool:
         if self.steps_since_semantic_progress < self.config.budget.semantic_patience_steps:
