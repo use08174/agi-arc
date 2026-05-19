@@ -139,9 +139,11 @@ class WorldModel:
     known_item_cells: set[Cell] = field(default_factory=set)
     known_goal_cells: set[Cell] = field(default_factory=set)
     known_button_cells: set[Cell] = field(default_factory=set)
+    known_display_cells: set[Cell] = field(default_factory=set)
     visible_item_cells: set[Cell] = field(default_factory=set)
     visible_goal_cells: set[Cell] = field(default_factory=set)
     visible_button_cells: set[Cell] = field(default_factory=set)
+    visible_display_cells: set[Cell] = field(default_factory=set)
     safe_edges: set[SafeEdge] = field(default_factory=set)
     deadly_edges: set[Edge] = field(default_factory=set)
     action_move_vectors: dict[str, Cell] = field(default_factory=dict)
@@ -159,6 +161,8 @@ class WorldModel:
     semantic_ascii_map: str = ""
     last_objects: list[dict[str, Any]] = field(default_factory=list)
     last_notes: dict[str, Any] = field(default_factory=dict)
+    goal_attempts_without_reward: int = 0
+    goal_deferred: bool = False
 
     def update_from_observation(self, notes: dict[str, Any]) -> None:
         self.last_notes = dict(notes)
@@ -184,6 +188,7 @@ class WorldModel:
         self.visible_item_cells = set()
         self.visible_goal_cells = set()
         self.visible_button_cells = set()
+        self.visible_display_cells = set()
         for item in notes.get("semantic_items", []) or []:
             center = _center_from_bbox(item.get("bbox"))
             if center is not None:
@@ -199,6 +204,11 @@ class WorldModel:
             if center is not None:
                 self.known_button_cells.add(center)
                 self.visible_button_cells.add(center)
+        for item in notes.get("semantic_displays", []) or []:
+            center = _center_from_bbox(item.get("bbox"))
+            if center is not None:
+                self.known_display_cells.add(center)
+                self.visible_display_cells.add(center)
         for item in notes.get("semantic_walls", []) or []:
             bbox = item.get("bbox")
             if isinstance(bbox, dict):
@@ -320,6 +330,12 @@ class WorldModel:
             lines.append(f"visible_items={sorted(self.visible_item_cells)[:8]} known_items={sorted(self.known_item_cells)[:8]}")
         if self.known_goal_cells:
             lines.append(f"known_goals={sorted(self.known_goal_cells)[:8]}")
+        if self.known_display_cells:
+            lines.append(f"known_displays={sorted(self.known_display_cells)[:8]}")
+        if self.goal_deferred or self.goal_attempts_without_reward:
+            lines.append(
+                f"goal_deferred={self.goal_deferred} goal_attempts_without_reward={self.goal_attempts_without_reward}"
+            )
         if self.known_blocked_cells:
             lines.append(f"blocked_count={len(self.known_blocked_cells)} sample={sorted(self.known_blocked_cells)[:8]}")
         if self.known_hazard_cells:
@@ -375,7 +391,10 @@ class WorldModel:
             self.hypotheses.get(name, GoalHypothesis(name)).confidence >= 0.30
             for name in ("collection_changes_state", "goal_requires_state_match")
         )
-        return legacy or self.hypothesis_library.confidence("state_match_before_goal") >= 0.30
+        return legacy or self.goal_deferred or self.goal_attempts_without_reward > 0 or self.hypothesis_library.confidence("state_match_before_goal") >= 0.30
+
+    def should_defer_goal(self) -> bool:
+        return self.goal_deferred or self.goal_attempts_without_reward > 0 or self.has_precondition_evidence()
 
     def likely_interactable_tracks(self, limit: int = 6) -> list[ObjectTrack]:
         tracks = [
@@ -507,14 +526,25 @@ class WorldModel:
         removed = list((after_notes.get("collectible_changes", {}) or {}).get("removed", []) or [])
         anchor_changes = list(after_notes.get("anchor_patch_changes", []) or [])
         feedback = bool(after_notes.get("likely_feedback_flash", False))
+        after_player = _player_pos(after_notes)
+        touched_goal_without_reward = bool(
+            after_player is not None
+            and after_player in (self.visible_goal_cells or self.known_goal_cells)
+            and not removed
+            and not anchor_changes
+            and not bool(after_notes.get("collectible_progress", False))
+        )
         if removed:
             detail = f"collectible_removed={removed[:3]}"
             self._remember_event("collectible_removed", detail)
+            self.goal_deferred = False
+            self.goal_attempts_without_reward = 0
         if anchor_changes:
             detail = f"anchor_patches_changed={anchor_changes}"
             self._remember_event("anchor_patch_changed", detail)
             for anchor in anchor_changes:
                 self.anchor_patch_change_counts[anchor] += 1
+            self.goal_deferred = False
         if removed and anchor_changes:
             self._support_hypothesis("collection_changes_state", 0.35, f"{removed[:2]} followed by patch changes {anchor_changes}")
             self._mark_recent_disappeared_as("collectible", 0.45)
@@ -523,6 +553,18 @@ class WorldModel:
             self._support_hypothesis("goal_requires_state_match", 0.25, "feedback flash observed without reward")
             if anchor_changes:
                 self._support_hypothesis("goal_requires_state_match", 0.15, f"feedback coincided with patch changes {anchor_changes}")
+        if touched_goal_without_reward or (feedback and (self.visible_goal_cells or self.known_goal_cells)):
+            self.goal_attempts_without_reward += 1
+            self.goal_deferred = True
+            self._remember_event(
+                "goal_attempt_without_reward",
+                f"player={after_player} feedback={feedback} attempts={self.goal_attempts_without_reward}",
+            )
+            self._support_hypothesis(
+                "goal_requires_state_match",
+                0.30 if touched_goal_without_reward else 0.20,
+                "goal contact or feedback occurred without win/reward",
+            )
         self._update_display_roles(anchor_changes)
 
     def _remember_event(self, kind: str, detail: str) -> None:

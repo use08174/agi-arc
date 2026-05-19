@@ -29,15 +29,21 @@ class ArcAgentRuntime:
         self.recent_actions: deque[str] = deque(
             maxlen=self.config.budget.recent_action_window
         )
+        self.recent_action_keys: deque[str] = deque(
+            maxlen=self.config.budget.recent_action_window
+        )
         self.decision_traces: list[DecisionTrace] = []
         self.steps_since_new_state = 0
         self.steps_since_semantic_progress = 0
+        self.click_no_progress_counts: dict[str, int] = {}
 
     def reset_level(self) -> None:
         self.graph = StateGraph()
         self.previous_observation = None
         self.recent_states = deque(maxlen=self.config.budget.recent_state_window)
         self.recent_actions = deque(maxlen=self.config.budget.recent_action_window)
+        self.recent_action_keys = deque(maxlen=self.config.budget.recent_action_window)
         self.decision_traces = []
         self.steps_since_new_state = 0
         self.steps_since_semantic_progress = 0
+        self.click_no_progress_counts = {}

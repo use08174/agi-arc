@@ -105,10 +105,12 @@ class FrontierExplorer:
         graph: StateGraph,
         game_memory: GameMemory,
         recent_action_names: list[str],
+        recent_action_keys: list[str],
     ) -> Action | None:
         world = game_memory.world_model
         ranked = []
         recent = set(recent_action_names)
+        recent_keys = set(recent_action_keys)
         for index, action in enumerate(actions):
             if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
@@ -124,6 +126,7 @@ class FrontierExplorer:
             ranked.append(
                 (
                     successor is not None,
+                    action.key in recent_keys,
                     action.name in recent,
                     learned_label not in {"unknown"} and learned_confidence >= 0.6,
                     meaning.uses,

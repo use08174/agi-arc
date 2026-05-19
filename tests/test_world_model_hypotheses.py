@@ -81,6 +81,39 @@ class WorldModelHypothesesTest(unittest.TestCase):
         self.assertTrue(world.hypothesis_library.preferred_subgoals(world))
         self.assertTrue(world.hypothesis_library.proposed_tests(world))
 
+    def test_goal_contact_without_reward_defers_goal_and_supports_precondition(self) -> None:
+        world = WorldModel()
+        world.update_from_observation(
+            {
+                "semantic_goals": [{"bbox": {"min_x": 4, "max_x": 4, "min_y": 1, "max_y": 1}}],
+                "semantic_player_pos": (4, 1),
+            }
+        )
+        world.learn_transition(
+            action=Action(name="ACTION1"),
+            before_notes={"semantic_player_pos": (3, 1)},
+            after_notes={"semantic_player_pos": (4, 1)},
+            terminal_loss=False,
+        )
+
+        self.assertTrue(world.goal_deferred)
+        self.assertTrue(world.has_precondition_evidence())
+        self.assertTrue(any("goal_attempt_without_reward" in line for line in world.event_lines()))
+
+    def test_planner_prefers_display_before_goal_when_goal_is_deferred(self) -> None:
+        world = WorldModel(
+            player_pos=(1, 0),
+            known_traversable_cells={(0, 0), (1, 0), (2, 0)},
+            visible_goal_cells={(2, 0)},
+            visible_display_cells={(0, 0)},
+            action_move_vectors={"ACTION1": (-1, 0), "ACTION2": (1, 0)},
+            goal_deferred=True,
+        )
+
+        path = PathPlanner().plan_to_nearest_item_or_goal(world, [Action(name="ACTION1"), Action(name="ACTION2")])
+
+        self.assertEqual([action.name for action in path], ["ACTION1"])
+
     def test_bottom_display_becomes_mutable_panel_after_anchor_change(self) -> None:
         world = WorldModel()
         world.update_from_observation(

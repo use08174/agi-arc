@@ -45,17 +45,24 @@ class PathPlanner:
         visible_items = set(world.visible_item_cells)
         visible_goals = set(world.visible_goal_cells)
         visible_buttons = set(world.visible_button_cells)
-        if world.has_precondition_evidence() and visible_items:
+        visible_displays = set(world.visible_display_cells)
+        state_targets = visible_items or visible_displays or visible_buttons
+        if world.should_defer_goal() and state_targets:
+            targets = state_targets
+        elif world.has_precondition_evidence() and visible_items:
             targets = visible_items
         else:
-            targets = visible_items or visible_goals or visible_buttons
+            targets = state_targets or visible_goals
         return self.plan_to_targets(world, actions, targets)
 
     def safe_probe_action(self, world: WorldModel, actions: list[Action]) -> Action | None:
         pos = world.player_pos
         if pos is None:
             return None
-        targets = world.visible_item_cells or world.visible_goal_cells or world.visible_button_cells
+        if world.should_defer_goal():
+            targets = world.visible_item_cells or world.visible_display_cells or world.visible_button_cells or world.visible_goal_cells
+        else:
+            targets = world.visible_item_cells or world.visible_goal_cells or world.visible_button_cells or world.visible_display_cells
         ranked: list[tuple[int, int, Action]] = []
         for action in actions:
             if action.name in world.action_move_vectors:

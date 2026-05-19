@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from arc_agi3.agents.base import ArcAgentRuntime
 from arc_agi3.agents.env_understanding_agent import EnvUnderstandingAgent
 from arc_agi3.core.types import Action, DecisionTrace, Frame, GameStatus, Observation, Transition
@@ -145,27 +147,39 @@ class GraphSearchAgent(ArcAgentRuntime):
         self._learn_meta_action(transition)
         self._learn_action_semantics(transition)
         self.recent_actions.append(action.name)
+        self.recent_action_keys.append(action.key)
         if discovered_new_state:
             self.steps_since_new_state = 0
         else:
             self.steps_since_new_state += 1
-        semantic_progress = bool(
-            reward_delta > 0
-            or next_observation.notes.get("collectible_progress", False)
-            or next_observation.notes.get("anchor_patch_changes", [])
-            or (experiment_outcome is not None and experiment_outcome.status == "confirmed")
-        )
+        semantic_progress = self._is_semantic_progress(next_observation, reward_delta, experiment_outcome)
         if semantic_progress:
             self.steps_since_semantic_progress = 0
         else:
             self.steps_since_semantic_progress += 1
+        if action.payload:
+            if semantic_progress:
+                self.click_no_progress_counts.pop(action.key, None)
+            else:
+                self.click_no_progress_counts[action.key] = self.click_no_progress_counts.get(action.key, 0) + 1
         self.recent_states.append(next_observation.state_key)
         return next_observation
+
+    def _is_semantic_progress(self, next_observation: Observation, reward_delta: float, experiment_outcome) -> bool:
+        notes = next_observation.notes
+        if reward_delta > 0 or notes.get("collectible_progress", False) or notes.get("anchor_patch_changes", []):
+            return True
+        if experiment_outcome is not None and experiment_outcome.status == "confirmed":
+            return True
+        interaction_hint = str(notes.get("interaction_hint", "unknown"))
+        likely_feedback_flash = bool(notes.get("likely_feedback_flash", False))
+        return interaction_hint in {"spawn_or_unlock", "board_or_room_transform"} and not likely_feedback_flash
 
     def _choose_action(self, step_idx: int, observation: Observation, actions: list[Action]) -> Action:
         actions = self._filter_useless_actions(observation, actions)
         force_exploration = self._should_force_exploration(step_idx, observation)
         actions = self._prefer_unseen_actions(observation, actions, force_exploration)
+        actions = self._reprioritize_click_actions(actions)
         self._activate_experiment_if_idle(observation, actions, force_exploration)
         experiment_plan = self.planner.build_experiment_plan(
             experiment=self.game_memory.experiments.active,
@@ -186,6 +200,7 @@ class GraphSearchAgent(ArcAgentRuntime):
                 graph=self.graph,
                 game_memory=self.game_memory,
                 recent_action_names=list(self.recent_actions),
+                recent_action_keys=list(self.recent_action_keys),
             )
             if counterfactual is not None:
                 return self._trace_decision(step_idx, observation, counterfactual, "counterfactual", "breaking repetitive low-progress action loop")
@@ -227,6 +242,23 @@ class GraphSearchAgent(ArcAgentRuntime):
             return actions
         unseen = [action for action in actions if self.graph.seen_successor(observation.state_key, action) is None]
         return unseen or actions
+
+    def _reprioritize_click_actions(self, actions: list[Action]) -> list[Action]:
+        if not actions:
+            return actions
+        recent_key_counts = Counter(self.recent_action_keys)
+
+        def sort_key(action: Action) -> tuple:
+            if not action.payload:
+                return (0, 0, 0, action.key)
+            return (
+                1,
+                self.click_no_progress_counts.get(action.key, 0),
+                recent_key_counts.get(action.key, 0),
+                action.key,
+            )
+
+        return sorted(actions, key=sort_key)
 
     def _activate_experiment_if_idle(self, observation: Observation, actions: list[Action], force_exploration: bool) -> None:
         if self.game_memory.experiments.active is not None or not actions:
@@ -345,6 +377,8 @@ class GraphSearchAgent(ArcAgentRuntime):
                 continue
             if action.key in self.game_memory.dangerous_action_keys:
                 continue
+            if action.payload and self.click_no_progress_counts.get(action.key, 0) >= 2:
+                continue
             if self.game_memory.world_model.is_unsafe_action(action):
                 continue
             if self.graph.action_is_probably_useless(observation.state_key, action):
@@ -401,6 +435,8 @@ class GraphSearchAgent(ArcAgentRuntime):
             if action.name in self.game_memory.undo_like_action_names or action.key in self.game_memory.undo_like_action_keys:
                 continue
             if action.key in self.game_memory.dangerous_action_keys:
+                continue
+            if action.payload and self.click_no_progress_counts.get(action.key, 0) >= 2:
                 continue
             if self.game_memory.world_model.is_unsafe_action(action):
                 continue
