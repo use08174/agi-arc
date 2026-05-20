@@ -7,13 +7,37 @@ from arc_agi3.core.types import Action, ExperimentOutcome, ExperimentProposal, T
 
 
 @dataclass(slots=True)
-class ExperimentManager:
-    """Tracks testable subgoals and scores their observed outcomes."""
+class ExperimentSession:
+    proposal: ExperimentProposal
+    target_ref: str
+    max_trials: int
+    max_steps: int
+    trial_count: int = 0
+    step_count: int = 0
+    repeated_action_count: int = 0
+    last_action_key: str = ""
 
-    active: ExperimentProposal | None = None
-    history: list[ExperimentOutcome] = field(default_factory=list)
-    completed_keys: set[str] = field(default_factory=set)
-    active_unplannable_steps: int = 0
+
+class ExperimentManager:
+    """Tracks testable subgoals and runs them as short bounded sessions."""
+
+    def __init__(
+        self,
+        active: ExperimentProposal | None = None,
+        history: list[ExperimentOutcome] | None = None,
+        completed_keys: set[str] | None = None,
+        active_unplannable_steps: int = 0,
+    ) -> None:
+        self.history = list(history or [])
+        self.completed_keys = set(completed_keys or set())
+        self.active_unplannable_steps = active_unplannable_steps
+        self.active_session: ExperimentSession | None = None
+        if active is not None:
+            self.activate(active)
+
+    @property
+    def active(self) -> ExperimentProposal | None:
+        return self.active_session.proposal if self.active_session is not None else None
 
     def available(self, world: Any, actions: list[Action], seen_action_keys: set[str]) -> list[ExperimentProposal]:
         proposals: list[ExperimentProposal] = []
@@ -26,7 +50,7 @@ class ExperimentManager:
                     target=target,
                     rationale="visible item-like object can test whether collection changes later state",
                     expected_if_true="object disappears or inventory-like/panel state changes",
-                    failure_signal="target reached but no collectible or panel change occurs",
+                    failure_signal="target reached or clicked repeatedly without collectible evidence",
                 ),
             )
         if self._button_tests_are_supported(world):
@@ -39,7 +63,7 @@ class ExperimentManager:
                         target=target,
                         rationale="button-like object can test whether a passage or board state changes",
                         expected_if_true="blocked region, room, or board layout changes",
-                        failure_signal="interaction produces only HUD/noop feedback",
+                        failure_signal="repeated interaction produces only HUD/noop feedback",
                     ),
                 )
         if not world.has_precondition_evidence():
@@ -47,12 +71,12 @@ class ExperimentManager:
                 self._append_if_new(
                     proposals,
                     ExperimentProposal(
-                    key=f"go_to_goal:{target[0]},{target[1]}",
-                    kind="go_to_goal",
-                    target=target,
-                    rationale="visible goal candidate can test direct navigation only when gating evidence is weak",
-                    expected_if_true="reward or win occurs",
-                    failure_signal="feedback flash or no progress at goal",
+                        key=f"go_to_goal:{target[0]},{target[1]}",
+                        kind="go_to_goal",
+                        target=target,
+                        rationale="visible goal candidate can test direct navigation only when gating evidence is weak",
+                        expected_if_true="reward or win occurs",
+                        failure_signal="feedback flash or repeated no-progress attempts at goal",
                     ),
                 )
         for relation in world.relation_details.values():
@@ -127,19 +151,35 @@ class ExperimentManager:
         return proposals
 
     def activate(self, proposal: ExperimentProposal) -> None:
-        self.active = proposal
+        self.active_session = ExperimentSession(
+            proposal=proposal,
+            target_ref=self._target_ref(proposal),
+            max_trials=self._max_trials(proposal),
+            max_steps=self._max_steps(proposal),
+        )
         self.active_unplannable_steps = 0
 
     def activate_if_idle(self, proposal: ExperimentProposal) -> bool:
-        if self.active is not None:
+        if self.active_session is not None:
             return False
-        self.active = proposal
-        self.active_unplannable_steps = 0
+        self.activate(proposal)
         return True
 
-    def note_plan_result(self, plannable: bool, limit: int = 3) -> ExperimentOutcome | None:
-        proposal = self.active
-        if proposal is None:
+    def note_execution(self, action: Action) -> None:
+        session = self.active_session
+        if session is None:
+            return
+        session.step_count += 1
+        if session.last_action_key == action.key:
+            session.repeated_action_count += 1
+        else:
+            session.repeated_action_count = 1
+            session.last_action_key = action.key
+        session.trial_count += 1
+
+    def note_plan_result(self, plannable: bool, limit: int = 2) -> ExperimentOutcome | None:
+        session = self.active_session
+        if session is None:
             return None
         if plannable:
             self.active_unplannable_steps = 0
@@ -147,17 +187,13 @@ class ExperimentManager:
         self.active_unplannable_steps += 1
         if self.active_unplannable_steps < limit:
             return None
-        outcome = ExperimentOutcome(
-            proposal=proposal,
-            status="inconclusive",
-            evidence="no_executable_plan_from_current_world_model",
+        return self._finish(
+            ExperimentOutcome(
+                proposal=session.proposal,
+                status="abandoned",
+                evidence="no_executable_plan_from_current_world_model",
+            )
         )
-        self.history.append(outcome)
-        self.completed_keys.add(proposal.key)
-        self.active = None
-        self.active_unplannable_steps = 0
-        del self.history[:-24]
-        return outcome
 
     def observe_transition(
         self,
@@ -165,34 +201,42 @@ class ExperimentManager:
         after_notes: dict[str, Any],
         world: Any,
     ) -> ExperimentOutcome | None:
-        proposal = self.active
-        if proposal is None:
+        session = self.active_session
+        if session is None:
             return None
-        outcome = self._score(proposal, transition, after_notes, world)
-        if outcome is None:
-            return None
-        self.history.append(outcome)
-        self.completed_keys.add(proposal.key)
-        self.active = None
-        self.active_unplannable_steps = 0
-        del self.history[:-24]
-        return outcome
+        outcome = self._score(session, transition, after_notes, world)
+        if outcome is not None:
+            return self._finish(outcome)
+        if self._should_abandon(session, transition, after_notes, world):
+            return self._finish(
+                ExperimentOutcome(
+                    proposal=session.proposal,
+                    status="contradicted",
+                    evidence=self._abandon_evidence(session, transition, after_notes),
+                )
+            )
+        return None
 
     def summary_lines(self, limit: int = 6) -> list[str]:
         lines: list[str] = []
-        if self.active is not None:
-            lines.append(f"active={self.active.key} expected={self.active.expected_if_true}")
+        if self.active_session is not None:
+            session = self.active_session
+            lines.append(
+                f"active={session.proposal.key} expected={session.proposal.expected_if_true} "
+                f"trials={session.trial_count}/{session.max_trials} steps={session.step_count}/{session.max_steps}"
+            )
         for outcome in self.history[-limit:]:
             lines.append(f"{outcome.proposal.key} -> {outcome.status}: {outcome.evidence}")
         return lines
 
     def _score(
         self,
-        proposal: ExperimentProposal,
+        session: ExperimentSession,
         transition: Transition,
         after_notes: dict[str, Any],
         world: Any,
     ) -> ExperimentOutcome | None:
+        proposal = session.proposal
         removed = list((after_notes.get("collectible_changes", {}) or {}).get("removed", []) or [])
         anchor_changes = list(after_notes.get("anchor_patch_changes", []) or [])
         feedback = bool(after_notes.get("likely_feedback_flash", False))
@@ -204,7 +248,7 @@ class ExperimentManager:
                 evidence = f"collectible_removed={removed[:2]} anchor_changes={anchor_changes or 'none'}"
                 return ExperimentOutcome(proposal=proposal, status="confirmed", evidence=evidence)
             if player_pos == proposal.target and transition.changed:
-                return ExperimentOutcome(proposal=proposal, status="contradicted", evidence="target reached without collectible evidence")
+                return ExperimentOutcome(proposal=proposal, status="contradicted", evidence="target_reached_without_collectible_evidence")
             return None
 
         if proposal.kind == "activate_button":
@@ -227,8 +271,8 @@ class ExperimentManager:
             if transition.action.key != proposal.target:
                 return None
             if transition.changed and not feedback:
-                return ExperimentOutcome(proposal=proposal, status="confirmed", evidence="new action produced non-feedback state change")
-            return ExperimentOutcome(proposal=proposal, status="contradicted", evidence="action produced noop_or_feedback_only")
+                return ExperimentOutcome(proposal=proposal, status="confirmed", evidence="new_action_produced_non_feedback_state_change")
+            return ExperimentOutcome(proposal=proposal, status="contradicted", evidence="action_produced_noop_or_feedback_only")
 
         if proposal.kind == "discover_axis" and isinstance(proposal.target, dict):
             if transition.action.key != proposal.target.get("action_key"):
@@ -262,23 +306,56 @@ class ExperimentManager:
             baseline = int(proposal.target.get("baseline_distance", 0) or 0)
             relation = world.relation_for(key)
             if relation is None:
-                return ExperimentOutcome(proposal=proposal, status="confirmed", evidence="relation disappeared_or_merged")
+                return ExperimentOutcome(proposal=proposal, status="confirmed", evidence="relation_disappeared_or_merged")
             if relation.min_distance < baseline:
-                return ExperimentOutcome(
-                    proposal=proposal,
-                    status="confirmed",
-                    evidence=f"relation_distance {baseline}->{relation.min_distance}",
-                )
+                return ExperimentOutcome(proposal=proposal, status="confirmed", evidence=f"relation_distance {baseline}->{relation.min_distance}")
             nearest_pair = tuple(proposal.target.get("nearest_pair", ()))
             if player_pos in nearest_pair and transition.changed:
-                return ExperimentOutcome(
-                    proposal=proposal,
-                    status="contradicted",
-                    evidence=f"inspected endpoint without relation progress distance={relation.min_distance}",
-                )
+                return ExperimentOutcome(proposal=proposal, status="contradicted", evidence=f"inspected_endpoint_without_relation_progress distance={relation.min_distance}")
             return None
 
         return None
+
+    def _should_abandon(
+        self,
+        session: ExperimentSession,
+        transition: Transition,
+        after_notes: dict[str, Any],
+        world: Any,
+    ) -> bool:
+        if session.step_count >= session.max_steps or session.trial_count >= session.max_trials:
+            return True
+        proposal = session.proposal
+        if proposal.kind in {"collect_item", "activate_button", "inspect_affordance"} and transition.action.payload:
+            if session.repeated_action_count >= 2 and not self._goal_relevant_change(after_notes):
+                return True
+        if proposal.kind == "go_to_goal" and world.should_defer_goal():
+            return True
+        return False
+
+    def _goal_relevant_change(self, after_notes: dict[str, Any]) -> bool:
+        return bool(
+            after_notes.get("collectible_progress", False)
+            or after_notes.get("anchor_patch_changes", [])
+            or str(after_notes.get("interaction_hint", "unknown")) in {"spawn_or_unlock", "board_or_room_transform"}
+            or (after_notes.get("collectible_changes", {}) or {}).get("removed", [])
+        )
+
+    def _abandon_evidence(self, session: ExperimentSession, transition: Transition, after_notes: dict[str, Any]) -> str:
+        proposal = session.proposal
+        if proposal.kind in {"collect_item", "activate_button", "inspect_affordance"} and transition.action.payload:
+            return f"repeated_direct_interaction_without_goal_relevant_change trials={session.trial_count}"
+        if proposal.kind == "go_to_goal":
+            return "goal_deferred_or_no_reward_after_attempts"
+        return f"trial_limit_reached trials={session.trial_count} steps={session.step_count}"
+
+    def _finish(self, outcome: ExperimentOutcome) -> ExperimentOutcome:
+        self.history.append(outcome)
+        self.completed_keys.add(outcome.proposal.key)
+        self.active_session = None
+        self.active_unplannable_steps = 0
+        del self.history[:-24]
+        return outcome
 
     def _append_if_new(self, proposals: list[ExperimentProposal], proposal: ExperimentProposal) -> None:
         if proposal.key in self.completed_keys:
@@ -291,10 +368,7 @@ class ExperimentManager:
         switch_family = world.hypothesis_library.families.get("switch_opens_path")
         direct_switch_evidence = False
         if switch_family is not None:
-            direct_switch_evidence = any(
-                "caused" in evidence or "interaction_hint=" in evidence
-                for evidence in switch_family.evidence
-            )
+            direct_switch_evidence = any("caused" in evidence or "interaction_hint=" in evidence for evidence in switch_family.evidence)
         if direct_switch_evidence and world.hypothesis_library.confidence("switch_opens_path") >= 0.28:
             return True
         for track in world.likely_interactable_tracks():
@@ -306,7 +380,7 @@ class ExperimentManager:
     def _missing_axis_for_visible_targets(self, world: Any) -> str | None:
         if world.player_pos is None:
             return None
-        targets = world.visible_item_cells or world.visible_goal_cells or world.visible_button_cells
+        targets = world.visible_item_cells or world.visible_goal_cells or world.visible_button_cells or world.visible_display_cells
         if not targets:
             return None
         px, py = world.player_pos
@@ -320,3 +394,31 @@ class ExperimentManager:
         if needs_horizontal and not has_horizontal:
             return "horizontal"
         return None
+
+    def _target_ref(self, proposal: ExperimentProposal) -> str:
+        if isinstance(proposal.target, tuple):
+            return f"cell:{proposal.target[0]},{proposal.target[1]}"
+        if isinstance(proposal.target, dict):
+            if "track_id" in proposal.target:
+                return f"track:{proposal.target['track_id']}"
+            if "relation_key" in proposal.target:
+                return f"relation:{proposal.target['relation_key']}"
+            if "action_key" in proposal.target:
+                return f"action:{proposal.target['action_key']}"
+        if isinstance(proposal.target, str):
+            return f"action:{proposal.target}"
+        return proposal.key
+
+    def _max_trials(self, proposal: ExperimentProposal) -> int:
+        if proposal.kind in {"probe_action", "discover_axis"}:
+            return 1
+        if proposal.kind in {"collect_item", "activate_button", "go_to_goal", "inspect_affordance"}:
+            return 2
+        return 3
+
+    def _max_steps(self, proposal: ExperimentProposal) -> int:
+        if proposal.kind in {"probe_action", "discover_axis"}:
+            return 1
+        if proposal.kind in {"collect_item", "activate_button", "go_to_goal", "inspect_affordance"}:
+            return 3
+        return 4

@@ -8,6 +8,8 @@ from arc_agi3.exploration.frontier import FrontierExplorer
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.memory.state_graph import StateGraph
 from arc_agi3.perception.hasher import StateHasher
+from arc_agi3.planning.experiment_policy import ExperimentPolicy
+from arc_agi3.planning.experiment_runner import ExperimentRunner
 from arc_agi3.planning.simple_planner import SimplePlanner
 
 
@@ -20,6 +22,8 @@ class ArcAgentRuntime:
         self.hasher = StateHasher()
         self.explorer = FrontierExplorer(self.config)
         self.planner = SimplePlanner()
+        self.experiment_policy = ExperimentPolicy()
+        self.experiment_runner = ExperimentRunner()
         self.game_memory = GameMemory()
         self.graph = StateGraph()
         self.previous_observation: Observation | None = None

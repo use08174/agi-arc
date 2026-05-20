@@ -206,11 +206,10 @@ class ExperimentTest(unittest.TestCase):
         )
 
         self.assertIsNone(manager.note_plan_result(plannable=False))
-        self.assertIsNone(manager.note_plan_result(plannable=False))
         outcome = manager.note_plan_result(plannable=False)
 
         self.assertIsNotNone(outcome)
-        self.assertEqual(outcome.status, "inconclusive")
+        self.assertEqual(outcome.status, "abandoned")
         self.assertIsNone(manager.active)
 
     def test_button_experiment_requires_supporting_evidence(self) -> None:

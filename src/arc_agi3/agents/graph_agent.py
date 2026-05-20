@@ -181,12 +181,18 @@ class GraphSearchAgent(ArcAgentRuntime):
         actions = self._prefer_unseen_actions(observation, actions, force_exploration)
         actions = self._reprioritize_click_actions(actions)
         self._activate_experiment_if_idle(observation, actions, force_exploration)
-        experiment_plan = self.planner.build_experiment_plan(
+        experiment_step = self.experiment_runner.build_step(
             experiment=self.game_memory.experiments.active,
             actions=actions,
             game_memory=self.game_memory,
         )
-        plan_outcome = self.game_memory.experiments.note_plan_result(plannable=bool(experiment_plan))
+        if experiment_step is not None:
+            self.game_memory.experiments.note_plan_result(plannable=True)
+            self.game_memory.experiments.note_execution(experiment_step.action)
+            return self._trace_decision(step_idx, observation, experiment_step.action, "experiment", experiment_step.reason)
+        plan_outcome = self.game_memory.experiments.note_plan_result(
+            plannable=self.game_memory.experiments.active is None
+        )
         if plan_outcome is not None:
             self.game_memory.world_model.hypothesis_library.apply_experiment_result(
                 kind=plan_outcome.proposal.kind,
@@ -204,9 +210,6 @@ class GraphSearchAgent(ArcAgentRuntime):
             )
             if counterfactual is not None:
                 return self._trace_decision(step_idx, observation, counterfactual, "counterfactual", "breaking repetitive low-progress action loop")
-        if experiment_plan:
-            step = experiment_plan[0]
-            return self._trace_decision(step_idx, observation, step.action, "experiment", step.reason)
         if not force_exploration:
             plan = self.planner.build_plan(
                 observation=observation,
@@ -272,39 +275,14 @@ class GraphSearchAgent(ArcAgentRuntime):
         )
         if not proposals:
             return
-        selected = self._select_experiment(proposals, force_exploration)
+        selected = self.experiment_policy.select(
+            proposals,
+            self.game_memory.world_model,
+            force_exploration,
+        )
         if selected is None:
             return
         self.game_memory.experiments.activate(selected)
-
-    def _select_experiment(self, proposals, force_exploration: bool):
-        world = self.game_memory.world_model
-        known_axes = {
-            axis
-            for dx, dy in world.action_move_vectors.values()
-            for axis in (
-                "horizontal" if dx != 0 else "",
-                "vertical" if dy != 0 else "",
-            )
-            if axis
-        }
-
-        def priority(proposal) -> tuple:
-            kind = proposal.kind
-            if kind == "discover_axis":
-                axis = str((proposal.target or {}).get("axis", ""))
-                return (0, axis in known_axes, proposal.key)
-            if kind == "probe_action":
-                return (1 if force_exploration else 2, proposal.key)
-            if kind == "inspect_affordance":
-                return (3, -float(proposal.confidence or 0.0), proposal.key)
-            if kind in {"collect_item", "activate_button", "go_to_goal"}:
-                return (4, proposal.key)
-            if kind == "inspect_relation":
-                return (5, proposal.key)
-            return (6, proposal.key)
-
-        return sorted(proposals, key=priority)[0] if proposals else None
 
     def _trace_decision(self, step_idx: int, observation: Observation, action: Action, source: str, reason: str) -> Action:
         self.decision_traces.append(
