@@ -69,6 +69,43 @@ class PlannerQualityTest(unittest.TestCase):
 
         self.assertEqual(plan[0].action.key, action.key)
 
+    def test_alignment_improving_action_is_preferred(self) -> None:
+        memory = GameMemory()
+        graph = StateGraph()
+        action_a = Action(name="ACTION3")
+        action_b = Action(name="ACTION4")
+        for action in (action_a, action_b):
+            memory.remember_effect(action.name, action.key, "changed_state")
+            graph.record(
+                Transition(
+                    from_state="s0",
+                    action=action,
+                    to_state=f"{action.key}_s1",
+                    changed=True,
+                )
+            )
+        memory.remember_alignment_signal(
+            action_b.name,
+            action_b.key,
+            alignment_delta=0.18,
+            family=memory.action_family(action_b.name, action_b.key),
+        )
+        observation = Observation(
+            state_key="s0",
+            frame=Frame(grid=((0,),)),
+            changed=True,
+        )
+
+        plan = SimplePlanner().build_plan(
+            observation=observation,
+            actions=[action_a, action_b],
+            graph=graph,
+            game_memory=memory,
+            recent_states=set(),
+        )
+
+        self.assertEqual(plan[0].action.key, action_b.key)
+
 
 if __name__ == "__main__":
     unittest.main()

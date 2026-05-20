@@ -66,15 +66,26 @@ class SimplePlanner:
                 action.key,
                 previous_action_key=previous_action_key,
             )
+            family = game_memory.action_family(
+                action.name,
+                action.key,
+                previous_action_key=previous_action_key,
+            )
             learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
             hints = set(profile.interaction_hints)
             context_progress = contextual.progress_ratio if contextual is not None else 0.0
             context_transform = contextual.dominant_transform if contextual is not None else "unknown"
+            alignment_score = game_memory.action_alignment_score(action.key)
+            alignment_success = game_memory.action_alignment_success_rate(action.key)
+            family_alignment_score = game_memory.family_alignment_score(family)
+            family_alignment_success = game_memory.family_alignment_success_rate(family)
             is_semantically_promising = (
                 profile.reward_total > 0
                 or profile.collectible_progress > 0
                 or bool(hints.intersection({"pickup_or_consume", "spawn_or_unlock", "board_or_room_transform"}))
                 or context_progress >= 0.34
+                or alignment_score > 0.02
+                or family_alignment_score > 0.015
             )
             is_new_frontier = graph.seen_successor(observation.state_key, action) is None
             is_promising = is_semantically_promising or (
@@ -97,8 +108,14 @@ class SimplePlanner:
                     successor is not None and successor == observation.state_key,
                     successor in recent_states if successor is not None else False,
                     graph.is_back_edge(observation.state_key, successor) if successor is not None else False,
+                    alignment_score <= 0.0 and family_alignment_score <= 0.0 and context_progress < 0.20,
+                    family_alignment_success <= 0.0 and alignment_success <= 0.0 and family in {"edit_or_mode", "simple:ACTION3", "simple:ACTION4", "simple:ACTION5"},
                     graph.traversals_for(observation.state_key, action, successor) if successor is not None else 0,
                     graph.visits_for(successor) if successor is not None else 0,
+                    -alignment_score,
+                    -family_alignment_score,
+                    -alignment_success,
+                    -family_alignment_success,
                     -context_progress,
                     context_transform == "noop",
                     -profile.reward_total,

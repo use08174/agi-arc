@@ -181,8 +181,15 @@ class GraphSearchAgent(ArcAgentRuntime):
                 region_bias=str(transition.notes.get("region_bias", "playfield")),
             )
         )
+        current_family = self.recent_action_families[-1]
         self.recent_effect_transforms.append(signature.transform_kind)
         self.recent_progress_scores.append(progress_signal.score)
+        self.game_memory.remember_alignment_signal(
+            action.name,
+            action.key,
+            alignment_delta=float(transition.notes.get("reference_workspace_alignment_delta", 0.0) or 0.0),
+            family=current_family,
+        )
         if semantic_progress:
             self.steps_since_semantic_progress = 0
         else:

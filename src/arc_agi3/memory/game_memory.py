@@ -42,6 +42,10 @@ class GameMemory:
     action_interaction_hints: dict[str, Counter[str]] = field(default_factory=dict)
     action_feedback_counts: dict[str, int] = field(default_factory=dict)
     action_collectible_progress_counts: dict[str, int] = field(default_factory=dict)
+    action_alignment_delta_total: dict[str, float] = field(default_factory=dict)
+    action_alignment_positive_counts: dict[str, int] = field(default_factory=dict)
+    action_family_alignment_delta_total: dict[str, float] = field(default_factory=dict)
+    action_family_alignment_positive_counts: dict[str, int] = field(default_factory=dict)
     learned_action_semantics: ActionSemanticsModel = field(default_factory=ActionSemanticsModel)
     action_effects: ActionEffectModel = field(default_factory=ActionEffectModel)
     progress_model: ProgressModel = field(default_factory=ProgressModel)
@@ -116,6 +120,53 @@ class GameMemory:
         change_kind = self._classify_change_kind(notes)
         self.action_change_kinds.setdefault(action_key, Counter())[change_kind] += 1
         self.action_semantics[action_name] = interaction_hint if interaction_hint != "unknown" else change_kind
+
+    def remember_alignment_signal(
+        self,
+        action_name: str,
+        action_key: str,
+        *,
+        alignment_delta: float,
+        family: str,
+    ) -> None:
+        self.action_alignment_delta_total[action_key] = self.action_alignment_delta_total.get(action_key, 0.0) + alignment_delta
+        if alignment_delta > 0:
+            self.action_alignment_positive_counts[action_key] = self.action_alignment_positive_counts.get(action_key, 0) + 1
+        self.action_family_alignment_delta_total[family] = self.action_family_alignment_delta_total.get(family, 0.0) + alignment_delta
+        if alignment_delta > 0:
+            self.action_family_alignment_positive_counts[family] = self.action_family_alignment_positive_counts.get(family, 0) + 1
+
+    def action_alignment_score(self, action_key: str) -> float:
+        uses = max(1, self.action_use_counts.get(action_key, 0))
+        return self.action_alignment_delta_total.get(action_key, 0.0) / uses
+
+    def action_alignment_success_rate(self, action_key: str) -> float:
+        uses = max(1, self.action_use_counts.get(action_key, 0))
+        return self.action_alignment_positive_counts.get(action_key, 0) / uses
+
+    def family_alignment_score(self, family: str) -> float:
+        uses = 0
+        for action_key in self.action_use_counts:
+            profile_family = self.action_family(
+                action_name=action_key.split("|", 1)[0],
+                action_key=action_key,
+            )
+            if profile_family == family:
+                uses += self.action_use_counts.get(action_key, 0)
+        uses = max(1, uses)
+        return self.action_family_alignment_delta_total.get(family, 0.0) / uses
+
+    def family_alignment_success_rate(self, family: str) -> float:
+        uses = 0
+        for action_key in self.action_use_counts:
+            profile_family = self.action_family(
+                action_name=action_key.split("|", 1)[0],
+                action_key=action_key,
+            )
+            if profile_family == family:
+                uses += self.action_use_counts.get(action_key, 0)
+        uses = max(1, uses)
+        return self.action_family_alignment_positive_counts.get(family, 0) / uses
 
     def semantic_profile(self, action_name: str, action_key: str) -> ActionSemanticProfile:
         uses = self.action_use_counts.get(action_key, 0)
