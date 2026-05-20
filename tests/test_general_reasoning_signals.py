@@ -109,6 +109,8 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertTrue(roles["reference_like"])
         self.assertTrue(roles["workspace_like"])
         self.assertTrue(roles["control_like"])
+        self.assertIsNotNone(semantic.region_match)
+        self.assertGreater(float((semantic.region_match or {}).get("alignment_score", 0.0) or 0.0), 0.0)
 
     def test_world_model_tracks_latent_workspace_and_reference_candidates(self) -> None:
         from arc_agi3.memory.world_model import WorldModel
@@ -129,6 +131,23 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertIn("workspace_signature", world.latent_state_candidates)
         self.assertIn("reference_signature", world.latent_state_candidates)
         self.assertIn("mode_state", world.latent_state_candidates)
+
+    def test_progress_model_rewards_reference_workspace_alignment_improvement(self) -> None:
+        model = ProgressModel()
+        signal = model.score_transition(
+            transition=Transition(from_state="a", action=Action(name="ACTION6", payload={"x": 2, "y": 2}), to_state="b", changed=True),
+            after_notes={
+                "changed_playfield_cells": 6,
+                "reference_workspace_alignment_score": 0.62,
+                "reference_workspace_alignment_delta": 0.18,
+                "interaction_hint": "unknown",
+            },
+            discovered_new_state=False,
+            experiment_outcome=None,
+        )
+
+        self.assertTrue(signal.score > 0.0)
+        self.assertIn("reference_workspace_alignment_improved", signal.reasons)
 
 
 if __name__ == "__main__":

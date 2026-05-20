@@ -7,6 +7,7 @@ from typing import Any
 
 from arc_agi3.core.types import Frame
 from arc_agi3.perception.region_roles import RegionRoleInferer
+from arc_agi3.perception.region_matcher import RegionMatcher
 
 
 @dataclass(slots=True)
@@ -25,6 +26,7 @@ class SemanticMap:
     hazards: list[dict[str, Any]]
     ascii_map: str
     region_roles: dict[str, list[dict[str, Any]]]
+    region_match: dict[str, Any] | None
 
     def to_notes(self) -> dict[str, Any]:
         role_counts = Counter(str(obj.get("role", "unknown")) for obj in self.objects)
@@ -48,6 +50,8 @@ class SemanticMap:
                 role: len(items)
                 for role, items in self.region_roles.items()
             },
+            "reference_workspace_match": self.region_match,
+            "reference_workspace_alignment_score": float((self.region_match or {}).get("alignment_score", 0.0) or 0.0),
         }
 
 
@@ -61,6 +65,7 @@ class MapParser:
 
     def __init__(self) -> None:
         self.region_role_inferer = RegionRoleInferer()
+        self.region_matcher = RegionMatcher()
 
     def parse(self, frame: Frame, previous: Frame | None = None, hud_rows: int | None = None) -> SemanticMap:
         grid = frame.grid
@@ -87,6 +92,10 @@ class MapParser:
             buttons=buttons,
             displays=displays,
         )
+        region_match = self.region_matcher.infer(
+            grid=grid,
+            region_roles=region_roles,
+        )
         return SemanticMap(
             width=width,
             height=height,
@@ -102,6 +111,7 @@ class MapParser:
             hazards=hazards,
             ascii_map=ascii_map,
             region_roles=region_roles,
+            region_match=region_match,
         )
 
     def _infer_hud_rows(self, frame: Frame) -> tuple[int, float]:

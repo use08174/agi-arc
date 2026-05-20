@@ -49,6 +49,14 @@ class ProgressModel:
         if bool(after_notes.get("collectible_progress", False)):
             goal_progress += 0.75
             reasons.append("collectible_progress")
+        reference_alignment = float(after_notes.get("reference_workspace_alignment_score", 0.0) or 0.0)
+        reference_delta = float(after_notes.get("reference_workspace_alignment_delta", 0.0) or 0.0)
+        if reference_alignment > 0.0:
+            semantic_change += min(0.20, reference_alignment * 0.20)
+            reasons.append("reference_workspace_structure")
+        if reference_delta > 0:
+            goal_progress += min(0.45, reference_delta * 1.2)
+            reasons.append("reference_workspace_alignment_improved")
         anchor_changes = list(after_notes.get("anchor_patch_changes", []) or [])
         if anchor_changes:
             semantic_change += 0.40

@@ -253,7 +253,21 @@ class StateHasher:
         prev_pos = _center(prev.player.get("bbox")) if prev.player else None
         curr_pos = _center(curr.player.get("bbox")) if curr.player else None
         moved = prev_pos is not None and curr_pos is not None and prev_pos != curr_pos
-        return {"semantic_previous_player_pos": prev_pos, "semantic_player_pos": curr_pos, "semantic_player_moved": moved}
+        prev_match_score = float((prev.region_match or {}).get("alignment_score", 0.0) or 0.0)
+        curr_match_score = float((curr.region_match or {}).get("alignment_score", 0.0) or 0.0)
+        return {
+            "semantic_previous_player_pos": prev_pos,
+            "semantic_player_pos": curr_pos,
+            "semantic_player_moved": moved,
+            "reference_workspace_previous_alignment_score": prev_match_score,
+            "reference_workspace_alignment_score": curr_match_score,
+            "reference_workspace_alignment_delta": round(curr_match_score - prev_match_score, 4),
+            "reference_workspace_layout_delta": round(
+                float((curr.region_match or {}).get("layout_similarity", 0.0) or 0.0)
+                - float((prev.region_match or {}).get("layout_similarity", 0.0) or 0.0),
+                4,
+            ),
+        }
 
     def _collectible_changes(self, previous: Frame, current: Frame) -> dict[str, list[str]]:
         prev = {

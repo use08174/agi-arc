@@ -160,6 +160,7 @@ class WorldModel:
     anchor_patch_change_counts: Counter[str] = field(default_factory=Counter)
     semantic_ascii_map: str = ""
     region_roles: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    reference_workspace_match: dict[str, Any] | None = None
     latent_state_candidates: dict[str, str] = field(default_factory=dict)
     latent_state_confidence: dict[str, float] = field(default_factory=dict)
     last_objects: list[dict[str, Any]] = field(default_factory=list)
@@ -175,6 +176,8 @@ class WorldModel:
             for role, items in (notes.get("semantic_region_roles", {}) or {}).items()
             if isinstance(items, list)
         }
+        match = notes.get("reference_workspace_match")
+        self.reference_workspace_match = match if isinstance(match, dict) else None
         self.anchor_patch_states = {
             str(item.get("anchor")): str(item.get("signature"))
             for item in notes.get("anchor_patch_summary", []) or []
@@ -354,6 +357,13 @@ class WorldModel:
                 for name, value in sorted(self.latent_state_candidates.items())
             )
             lines.append(f"latent_state={rendered_latent}")
+        if self.reference_workspace_match is not None:
+            lines.append(
+                "reference_workspace_match="
+                f"{self.reference_workspace_match.get('reference_anchor')}->"
+                f"{self.reference_workspace_match.get('workspace_anchor')} "
+                f"score={float(self.reference_workspace_match.get('alignment_score', 0.0) or 0.0):.2f}"
+            )
         if self.goal_deferred or self.goal_attempts_without_reward:
             lines.append(
                 f"goal_deferred={self.goal_deferred} goal_attempts_without_reward={self.goal_attempts_without_reward}"
@@ -601,6 +611,14 @@ class WorldModel:
                 self.latent_state_confidence.get("reference_signature", 0.0),
                 0.40,
             )
+        if self.reference_workspace_match is not None:
+            score = float(self.reference_workspace_match.get("alignment_score", 0.0) or 0.0)
+            if score > 0.0:
+                self.latent_state_candidates["edit_structure"] = "reference_workspace_pair"
+                self.latent_state_confidence["edit_structure"] = max(
+                    self.latent_state_confidence.get("edit_structure", 0.0),
+                    min(0.9, 0.30 + score * 0.55),
+                )
         if anchor_changes or interaction_hint in {"spawn_or_unlock", "board_or_room_transform"}:
             self.latent_state_candidates["mode_state"] = interaction_hint if interaction_hint != "unknown" else "panel_shift"
             self.latent_state_confidence["mode_state"] = max(
