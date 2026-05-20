@@ -4,8 +4,10 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from arc_agi3.core.types import ActionSemanticProfile, RuleHypothesis
+from arc_agi3.memory.action_effects import ActionEffectModel
 from arc_agi3.memory.action_semantics import ActionSemanticsModel
 from arc_agi3.memory.experiments import ExperimentManager
+from arc_agi3.memory.progress_model import ProgressModel
 from arc_agi3.memory.world_model import WorldModel
 
 
@@ -41,6 +43,8 @@ class GameMemory:
     action_feedback_counts: dict[str, int] = field(default_factory=dict)
     action_collectible_progress_counts: dict[str, int] = field(default_factory=dict)
     learned_action_semantics: ActionSemanticsModel = field(default_factory=ActionSemanticsModel)
+    action_effects: ActionEffectModel = field(default_factory=ActionEffectModel)
+    progress_model: ProgressModel = field(default_factory=ProgressModel)
     world_model: WorldModel = field(default_factory=WorldModel)
     experiments: ExperimentManager = field(default_factory=ExperimentManager)
 

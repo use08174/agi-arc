@@ -152,7 +152,24 @@ class GraphSearchAgent(ArcAgentRuntime):
             self.steps_since_new_state = 0
         else:
             self.steps_since_new_state += 1
-        semantic_progress = self._is_semantic_progress(next_observation, reward_delta, experiment_outcome)
+        progress_signal = self.game_memory.progress_model.score_transition(
+            transition=transition,
+            after_notes=next_observation.notes,
+            discovered_new_state=discovered_new_state,
+            experiment_outcome=experiment_outcome,
+        )
+        next_observation.notes.update(progress_signal.to_notes())
+        transition.notes.update(progress_signal.to_notes())
+        semantic_progress = progress_signal.is_progress
+        previous_state = self.recent_states[-2] if len(self.recent_states) >= 2 else None
+        self.game_memory.action_effects.observe(
+            action=action,
+            transition=transition,
+            notes=transition.notes,
+            progress_score=progress_signal.score,
+            returned_previous=previous_state is not None and transition.to_state == previous_state,
+            returned_initial=transition.to_state == getattr(self, "initial_state_key", None) and transition.from_state != transition.to_state,
+        )
         if semantic_progress:
             self.steps_since_semantic_progress = 0
         else:
@@ -164,16 +181,6 @@ class GraphSearchAgent(ArcAgentRuntime):
                 self.click_no_progress_counts[action.key] = self.click_no_progress_counts.get(action.key, 0) + 1
         self.recent_states.append(next_observation.state_key)
         return next_observation
-
-    def _is_semantic_progress(self, next_observation: Observation, reward_delta: float, experiment_outcome) -> bool:
-        notes = next_observation.notes
-        if reward_delta > 0 or notes.get("collectible_progress", False) or notes.get("anchor_patch_changes", []):
-            return True
-        if experiment_outcome is not None and experiment_outcome.status == "confirmed":
-            return True
-        interaction_hint = str(notes.get("interaction_hint", "unknown"))
-        likely_feedback_flash = bool(notes.get("likely_feedback_flash", False))
-        return interaction_hint in {"spawn_or_unlock", "board_or_room_transform"} and not likely_feedback_flash
 
     def _choose_action(self, step_idx: int, observation: Observation, actions: list[Action]) -> Action:
         actions = self._filter_useless_actions(observation, actions)
@@ -328,11 +335,14 @@ class GraphSearchAgent(ArcAgentRuntime):
         changed_hud_cells = int(notes.get("changed_hud_cells", 0) or 0)
         collectible_progress = bool(notes.get("collectible_progress", False))
         semantic_player_moved = bool(notes.get("semantic_player_moved", False))
+        progress_score = float(notes.get("progress_score", 0.0) or 0.0)
         hud_only_change = changed_hud_cells > 0 and changed_playfield_cells == 0 and transition.reward_delta <= 0 and not collectible_progress
         meaningful_change = changed_playfield_cells > 0 or transition.reward_delta > 0 or collectible_progress or semantic_player_moved
         if likely_feedback_flash or hud_only_change:
             self.game_memory.remember_effect(transition.action.name, transition.action.key, "feedback_only")
             self.game_memory.remember_feedback(transition.action.key)
+        elif progress_score >= 0.45:
+            self.game_memory.remember_effect(transition.action.name, transition.action.key, "progress")
         elif meaningful_change:
             self.game_memory.remember_effect(transition.action.name, transition.action.key, "changed_state")
         else:

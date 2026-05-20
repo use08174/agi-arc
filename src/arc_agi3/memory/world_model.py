@@ -159,6 +159,7 @@ class WorldModel:
     anchor_patch_states: dict[str, str] = field(default_factory=dict)
     anchor_patch_change_counts: Counter[str] = field(default_factory=Counter)
     semantic_ascii_map: str = ""
+    region_roles: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     last_objects: list[dict[str, Any]] = field(default_factory=list)
     last_notes: dict[str, Any] = field(default_factory=dict)
     goal_attempts_without_reward: int = 0
@@ -167,6 +168,11 @@ class WorldModel:
     def update_from_observation(self, notes: dict[str, Any]) -> None:
         self.last_notes = dict(notes)
         self.semantic_ascii_map = str(notes.get("semantic_ascii_map", ""))
+        self.region_roles = {
+            str(role): [item for item in items if isinstance(item, dict)]
+            for role, items in (notes.get("semantic_region_roles", {}) or {}).items()
+            if isinstance(items, list)
+        }
         self.anchor_patch_states = {
             str(item.get("anchor")): str(item.get("signature"))
             for item in notes.get("anchor_patch_summary", []) or []
@@ -223,6 +229,7 @@ class WorldModel:
             self._update_relation_candidates(self.last_objects)
             self._update_blocking_affordances()
         self.hypothesis_library.observe_scene(self)
+        self._support_region_role_hypotheses()
 
     def learn_transition(self, action: Action, before_notes: dict[str, Any], after_notes: dict[str, Any], terminal_loss: bool) -> None:
         before_player = _player_pos(before_notes)
@@ -332,6 +339,12 @@ class WorldModel:
             lines.append(f"known_goals={sorted(self.known_goal_cells)[:8]}")
         if self.known_display_cells:
             lines.append(f"known_displays={sorted(self.known_display_cells)[:8]}")
+        if self.region_roles:
+            region_summary = ", ".join(
+                f"{role}={len(items)}" for role, items in sorted(self.region_roles.items()) if items
+            )
+            if region_summary:
+                lines.append(f"region_roles={region_summary}")
         if self.goal_deferred or self.goal_attempts_without_reward:
             lines.append(
                 f"goal_deferred={self.goal_deferred} goal_attempts_without_reward={self.goal_attempts_without_reward}"
@@ -521,6 +534,27 @@ class WorldModel:
                 )
         self.relation_candidates = candidates
         self.relation_details = details
+
+    def _support_region_role_hypotheses(self) -> None:
+        reference_count = len(self.region_roles.get("reference_like", []))
+        workspace_count = len(self.region_roles.get("workspace_like", []))
+        control_count = len(self.region_roles.get("control_like", []))
+        if reference_count:
+            self._support_hypothesis("reference_pattern_present", 0.05, f"reference_like={reference_count}")
+        if workspace_count:
+            self._support_hypothesis("editable_workspace_present", 0.06, f"workspace_like={workspace_count}")
+        if reference_count and workspace_count:
+            self._support_hypothesis(
+                "reference_guides_workspace",
+                0.08,
+                f"reference_like={reference_count} workspace_like={workspace_count}",
+            )
+        if control_count and workspace_count:
+            self._support_hypothesis(
+                "control_region_may_edit_workspace",
+                0.05,
+                f"control_like={control_count} workspace_like={workspace_count}",
+            )
 
     def _learn_events_and_hypotheses(self, before_notes: dict[str, Any], after_notes: dict[str, Any]) -> None:
         removed = list((after_notes.get("collectible_changes", {}) or {}).get("removed", []) or [])

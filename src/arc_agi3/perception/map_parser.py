@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from arc_agi3.core.types import Frame
+from arc_agi3.perception.region_roles import RegionRoleInferer
 
 
 @dataclass(slots=True)
@@ -23,6 +24,7 @@ class SemanticMap:
     displays: list[dict[str, Any]]
     hazards: list[dict[str, Any]]
     ascii_map: str
+    region_roles: dict[str, list[dict[str, Any]]]
 
     def to_notes(self) -> dict[str, Any]:
         role_counts = Counter(str(obj.get("role", "unknown")) for obj in self.objects)
@@ -41,6 +43,11 @@ class SemanticMap:
             "semantic_hazards": self.hazards[:8],
             "semantic_role_counts": dict(role_counts),
             "semantic_ascii_map": self.ascii_map,
+            "semantic_region_roles": self.region_roles,
+            "semantic_region_role_counts": {
+                role: len(items)
+                for role, items in self.region_roles.items()
+            },
         }
 
 
@@ -51,6 +58,9 @@ class MapParser:
     large/border components are wall candidates, small isolated components are
     item/button candidates, and moving components between frames are player candidates.
     """
+
+    def __init__(self) -> None:
+        self.region_role_inferer = RegionRoleInferer()
 
     def parse(self, frame: Frame, previous: Frame | None = None, hud_rows: int | None = None) -> SemanticMap:
         grid = frame.grid
@@ -66,6 +76,17 @@ class MapParser:
         player = self._infer_player(objects, frame, previous, hud_rows)
         walls, items, goals, buttons, displays, hazards = self._classify(objects, player, width, height, hud_start)
         ascii_map = self._ascii(width, height, player, walls, items, goals, buttons, displays, hazards)
+        region_roles = self.region_role_inferer.infer(
+            width=width,
+            height=max(1, hud_start),
+            objects=objects,
+            player=player,
+            walls=walls,
+            items=items,
+            goals=goals,
+            buttons=buttons,
+            displays=displays,
+        )
         return SemanticMap(
             width=width,
             height=height,
@@ -80,6 +101,7 @@ class MapParser:
             displays=displays,
             hazards=hazards,
             ascii_map=ascii_map,
+            region_roles=region_roles,
         )
 
     def _infer_hud_rows(self, frame: Frame) -> tuple[int, float]:

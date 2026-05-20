@@ -102,6 +102,22 @@ class SequenceHypothesis(HypothesisFamily):
         return ["Track whether multiple interactions change later outcomes depending on order."]
 
 
+class EditableWorkspaceHypothesis(HypothesisFamily):
+    def __init__(self) -> None:
+        super().__init__(name="editable_workspace", prior=0.06)
+
+    def proposed_tests(self, world: Any) -> list[str]:
+        return ["Test whether a large mutable region changes after local interactions or mode toggles."]
+
+
+class ReferencePatternHypothesis(HypothesisFamily):
+    def __init__(self) -> None:
+        super().__init__(name="reference_pattern", prior=0.05)
+
+    def proposed_tests(self, world: Any) -> list[str]:
+        return ["Compare stable reference-like regions with mutable workspace-like regions after each edit."]
+
+
 class HypothesisLibrary:
     def __init__(self) -> None:
         self.families: dict[str, HypothesisFamily] = {
@@ -113,6 +129,8 @@ class HypothesisLibrary:
                 ConnectionHypothesis(),
                 SwitchPathHypothesis(),
                 SequenceHypothesis(),
+                EditableWorkspaceHypothesis(),
+                ReferencePatternHypothesis(),
             )
         }
 
@@ -127,8 +145,16 @@ class HypothesisLibrary:
             self._support("connect_same_feature", 0.05, world.relation_candidates[0])
         if any(track.best_role[0] == "mutable_panel" for track in world.object_tracks.values()):
             self._support("state_match_before_goal", 0.08, "mutable panel candidate observed")
+            self._support("editable_workspace", 0.05, "mutable panel candidate observed")
         if any(track.best_role[0] == "static_display" for track in world.object_tracks.values()):
             self._contradict("collect_before_goal", 0.01, "static display candidates should not be treated as items")
+        region_roles = getattr(world, "region_roles", {}) or {}
+        if region_roles.get("workspace_like"):
+            self._support("editable_workspace", 0.08, "workspace-like region observed")
+        if region_roles.get("reference_like"):
+            self._support("reference_pattern", 0.07, "reference-like region observed")
+        if region_roles.get("workspace_like") and region_roles.get("reference_like"):
+            self._support("reference_pattern", 0.06, "reference and workspace regions observed together")
 
     def observe_transition(self, world: Any, after_notes: dict[str, Any]) -> None:
         removed = list((after_notes.get("collectible_changes", {}) or {}).get("removed", []) or [])
@@ -147,10 +173,14 @@ class HypothesisLibrary:
             self._contradict("plain_navigation", 0.12, "direct progress produced failure feedback")
         if interaction_hint in {"spawn_or_unlock", "board_or_room_transform"} and world.visible_button_cells:
             self._support("switch_opens_path", 0.18, f"button-like interaction caused {interaction_hint}")
+        if interaction_hint in {"spawn_or_unlock", "board_or_room_transform"} and getattr(world, "region_roles", {}).get("workspace_like"):
+            self._support("editable_workspace", 0.08, f"workspace changed via {interaction_hint}")
         if interaction_hint == "hud_or_counter_update":
             self._contradict("plain_navigation", 0.01, "HUD-only update is not task progress")
         if len([event for event in world.recent_events if event.kind == "collectible_removed"]) >= 2:
             self._support("sequence_required", 0.14, "multiple collectible interactions observed")
+        if after_notes.get("anchor_patch_changes") and getattr(world, "region_roles", {}).get("reference_like"):
+            self._support("reference_pattern", 0.10, "reference-like anchors changed after interaction")
 
     def ranked(self) -> list[HypothesisFamily]:
         return sorted(self.families.values(), key=lambda family: (-family.confidence, family.name))
