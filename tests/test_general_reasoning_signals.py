@@ -65,12 +65,16 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
             progress_score=0.6,
             returned_previous=False,
             returned_initial=False,
+            previous_action_key="ACTION5",
+            latent_state={"workspace_signature": "5x5:3", "mode_state": "select_color"},
         )
 
         self.assertEqual(signature.transform_kind, "repaint_or_mode_change")
         self.assertEqual(signature.primary_region, "playfield")
         self.assertTrue(signature.progress_like)
         self.assertIn("workspace_like", signature.semantic_roles)
+        self.assertIn("prev=ACTION5", signature.context_key)
+        self.assertIn("mode=select_color", signature.context_key)
 
     def test_parser_infers_reference_and_workspace_roles(self) -> None:
         parser = MapParser()
@@ -97,6 +101,26 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertTrue(roles["reference_like"])
         self.assertTrue(roles["workspace_like"])
         self.assertTrue(roles["control_like"])
+
+    def test_world_model_tracks_latent_workspace_and_reference_candidates(self) -> None:
+        from arc_agi3.memory.world_model import WorldModel
+
+        world = WorldModel()
+        world.update_from_observation(
+            {
+                "semantic_region_roles": {
+                    "reference_like": [{"bbox": {"width": 2, "height": 2}, "color": 2, "anchor": "top_left"}],
+                    "workspace_like": [{"bbox": {"width": 5, "height": 5}, "color": 3, "anchor": "middle_center"}],
+                    "control_like": [{"bbox": {"width": 2, "height": 2}, "color": 4, "anchor": "bottom_left"}],
+                },
+                "interaction_hint": "spawn_or_unlock",
+                "anchor_patch_changes": ["bottom_left"],
+            }
+        )
+
+        self.assertIn("workspace_signature", world.latent_state_candidates)
+        self.assertIn("reference_signature", world.latent_state_candidates)
+        self.assertIn("mode_state", world.latent_state_candidates)
 
 
 if __name__ == "__main__":

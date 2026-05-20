@@ -14,6 +14,7 @@ class ActionEffectSignature:
     primary_region: str
     interaction_hint: str
     semantic_roles: tuple[str, ...]
+    context_key: str
     reversible: bool
     progress_like: bool
     reward_like: bool
@@ -25,6 +26,7 @@ class ActionEffectAggregate:
     progress_uses: int = 0
     reversible_uses: int = 0
     reward_total: float = 0.0
+    context_keys: Counter[str] = field(default_factory=Counter)
     transform_kinds: Counter[str] = field(default_factory=Counter)
     spatial_scopes: Counter[str] = field(default_factory=Counter)
     primary_regions: Counter[str] = field(default_factory=Counter)
@@ -38,6 +40,10 @@ class ActionEffectAggregate:
     @property
     def dominant_region(self) -> str:
         return self.primary_regions.most_common(1)[0][0] if self.primary_regions else "unknown"
+
+    @property
+    def dominant_context(self) -> str:
+        return self.context_keys.most_common(1)[0][0] if self.context_keys else "unknown"
 
     @property
     def progress_ratio(self) -> float:
@@ -58,6 +64,8 @@ class ActionEffectModel:
         progress_score: float,
         returned_previous: bool,
         returned_initial: bool,
+        previous_action_key: str | None = None,
+        latent_state: dict[str, str] | None = None,
     ) -> ActionEffectSignature:
         signature = self._infer_signature(
             transition=transition,
@@ -65,10 +73,13 @@ class ActionEffectModel:
             progress_score=progress_score,
             returned_previous=returned_previous,
             returned_initial=returned_initial,
+            previous_action_key=previous_action_key,
+            latent_state=latent_state or {},
         )
-        aggregate = self.signatures.setdefault(action.key, ActionEffectAggregate())
+        aggregate = self.signatures.setdefault(f"{action.key}@@{signature.context_key}", ActionEffectAggregate())
         aggregate.uses += 1
         aggregate.reward_total += float(transition.reward_delta)
+        aggregate.context_keys[signature.context_key] += 1
         aggregate.transform_kinds[signature.transform_kind] += 1
         aggregate.spatial_scopes[signature.spatial_scope] += 1
         aggregate.primary_regions[signature.primary_region] += 1
@@ -91,6 +102,8 @@ class ActionEffectModel:
         progress_score: float,
         returned_previous: bool,
         returned_initial: bool,
+        previous_action_key: str | None,
+        latent_state: dict[str, str],
     ) -> ActionEffectSignature:
         changed_cells = int(notes.get("changed_cells", 0) or 0)
         changed_playfield_cells = int(notes.get("changed_playfield_cells", 0) or 0)
@@ -134,6 +147,12 @@ class ActionEffectModel:
         roles = tuple(
             sorted(role for role, items in semantic_region_roles.items() if isinstance(items, list) and items)
         )
+        dominant_workspace = latent_state.get("workspace_signature", "none")
+        dominant_mode = latent_state.get("mode_state", "none")
+        dominant_prev = previous_action_key or "none"
+        context_key = (
+            f"prev={dominant_prev}|region={region_bias}|mode={dominant_mode}|workspace={dominant_workspace}"
+        )
         reversible = returned_previous or returned_initial
         return ActionEffectSignature(
             transform_kind=transform_kind,
@@ -141,6 +160,7 @@ class ActionEffectModel:
             primary_region=region_bias,
             interaction_hint=interaction_hint,
             semantic_roles=roles,
+            context_key=context_key,
             reversible=reversible,
             progress_like=progress_score >= 0.45 or transition.reward_delta > 0 or transition.won,
             reward_like=transition.reward_delta > 0 or transition.won,

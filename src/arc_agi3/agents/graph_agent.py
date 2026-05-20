@@ -162,6 +162,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         transition.notes.update(progress_signal.to_notes())
         semantic_progress = progress_signal.is_progress
         previous_state = self.recent_states[-2] if len(self.recent_states) >= 2 else None
+        previous_action_key = self.recent_action_keys[-1] if self.recent_action_keys else None
         self.game_memory.action_effects.observe(
             action=action,
             transition=transition,
@@ -169,6 +170,8 @@ class GraphSearchAgent(ArcAgentRuntime):
             progress_score=progress_signal.score,
             returned_previous=previous_state is not None and transition.to_state == previous_state,
             returned_initial=transition.to_state == getattr(self, "initial_state_key", None) and transition.from_state != transition.to_state,
+            previous_action_key=previous_action_key,
+            latent_state=dict(self.game_memory.world_model.latent_state_candidates),
         )
         if semantic_progress:
             self.steps_since_semantic_progress = 0

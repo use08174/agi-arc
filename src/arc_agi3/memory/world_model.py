@@ -160,6 +160,8 @@ class WorldModel:
     anchor_patch_change_counts: Counter[str] = field(default_factory=Counter)
     semantic_ascii_map: str = ""
     region_roles: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    latent_state_candidates: dict[str, str] = field(default_factory=dict)
+    latent_state_confidence: dict[str, float] = field(default_factory=dict)
     last_objects: list[dict[str, Any]] = field(default_factory=list)
     last_notes: dict[str, Any] = field(default_factory=dict)
     goal_attempts_without_reward: int = 0
@@ -228,6 +230,7 @@ class WorldModel:
             self._update_tracks(self.last_objects)
             self._update_relation_candidates(self.last_objects)
             self._update_blocking_affordances()
+        self._update_latent_state_candidates(notes)
         self.hypothesis_library.observe_scene(self)
         self._support_region_role_hypotheses()
 
@@ -345,6 +348,12 @@ class WorldModel:
             )
             if region_summary:
                 lines.append(f"region_roles={region_summary}")
+        if self.latent_state_candidates:
+            rendered_latent = ", ".join(
+                f"{name}={value}:{self.latent_state_confidence.get(name, 0.0):.2f}"
+                for name, value in sorted(self.latent_state_candidates.items())
+            )
+            lines.append(f"latent_state={rendered_latent}")
         if self.goal_deferred or self.goal_attempts_without_reward:
             lines.append(
                 f"goal_deferred={self.goal_deferred} goal_attempts_without_reward={self.goal_attempts_without_reward}"
@@ -554,6 +563,49 @@ class WorldModel:
                 "control_region_may_edit_workspace",
                 0.05,
                 f"control_like={control_count} workspace_like={workspace_count}",
+            )
+
+    def _update_latent_state_candidates(self, notes: dict[str, Any]) -> None:
+        interaction_hint = str(notes.get("interaction_hint", "unknown"))
+        anchor_changes = list(notes.get("anchor_patch_changes", []) or [])
+        workspace_like = self.region_roles.get("workspace_like", [])
+        reference_like = self.region_roles.get("reference_like", [])
+        control_like = self.region_roles.get("control_like", [])
+        if control_like:
+            self.latent_state_candidates["control_mode"] = control_like[0].get("anchor", "control")
+            self.latent_state_confidence["control_mode"] = max(
+                self.latent_state_confidence.get("control_mode", 0.0),
+                0.35,
+            )
+        if workspace_like:
+            workspace = workspace_like[0]
+            signature = (
+                f"{workspace.get('bbox', {}).get('width', 0)}x"
+                f"{workspace.get('bbox', {}).get('height', 0)}:"
+                f"{workspace.get('color', 0)}"
+            )
+            self.latent_state_candidates["workspace_signature"] = signature
+            self.latent_state_confidence["workspace_signature"] = max(
+                self.latent_state_confidence.get("workspace_signature", 0.0),
+                0.40,
+            )
+        if reference_like:
+            reference = reference_like[0]
+            signature = (
+                f"{reference.get('bbox', {}).get('width', 0)}x"
+                f"{reference.get('bbox', {}).get('height', 0)}:"
+                f"{reference.get('color', 0)}"
+            )
+            self.latent_state_candidates["reference_signature"] = signature
+            self.latent_state_confidence["reference_signature"] = max(
+                self.latent_state_confidence.get("reference_signature", 0.0),
+                0.40,
+            )
+        if anchor_changes or interaction_hint in {"spawn_or_unlock", "board_or_room_transform"}:
+            self.latent_state_candidates["mode_state"] = interaction_hint if interaction_hint != "unknown" else "panel_shift"
+            self.latent_state_confidence["mode_state"] = max(
+                self.latent_state_confidence.get("mode_state", 0.0),
+                0.55,
             )
 
     def _learn_events_and_hypotheses(self, before_notes: dict[str, Any], after_notes: dict[str, Any]) -> None:
