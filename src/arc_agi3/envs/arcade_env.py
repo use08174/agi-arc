@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from pathlib import Path
 from typing import Any
 
@@ -75,17 +74,6 @@ class ArcadeEnvironment:
         self.expander = ActionExpander(click_config or ClickExpansionConfig())
         self._last_frame: Frame | None = None
         self.last_closed_scorecard: EnvironmentScorecard | None = None
-        self.debug_frames = os.getenv("ARC_AGI3_DEBUG_FRAMES", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        self.debug_frame_limit = max(
-            0,
-            int(os.getenv("ARC_AGI3_DEBUG_FRAME_LIMIT", "40") or 0),
-        )
-        self._debug_frame_counter = 0
 
     def reset(self) -> Frame:
         raw = self.wrapper.reset()
@@ -142,7 +130,6 @@ class ArcadeEnvironment:
             raise ValueError(f"Unsupported ARC mode: {mode}") from exc
 
     def _convert_frame(self, raw: FrameDataRaw) -> Frame:
-        self._maybe_print_frame_debug(raw)
         final_grid = self._extract_final_grid(raw)
         status = self._map_status(raw.state)
         info = {
@@ -155,45 +142,6 @@ class ArcadeEnvironment:
         }
         return Frame(grid=final_grid, status=status, info=info)
 
-    def _maybe_print_frame_debug(self, raw: FrameDataRaw) -> None:
-        if not self.debug_frames:
-            return
-        if self.debug_frame_limit and self._debug_frame_counter >= self.debug_frame_limit:
-            return
-        rendered_frames = getattr(raw, "frame", []) or []
-        normalized = [self._normalize_grid(frame) for frame in rendered_frames]
-        frame_count = len(normalized)
-        shapes = [f"{len(grid)}x{len(grid[0])}" if grid and grid[0] else "0x0" for grid in normalized]
-        deltas_between = [
-            self._grid_delta_count(normalized[index - 1], normalized[index])
-            for index in range(1, frame_count)
-        ]
-        first_last_delta = (
-            self._grid_delta_count(normalized[0], normalized[-1]) if frame_count >= 2 else 0
-        )
-        final_grid = normalized[-1] if normalized else []
-        preview = self._grid_preview(final_grid)
-        available_actions = [getattr(action, "name", str(action)) for action in list(getattr(raw, "available_actions", []) or [])]
-        state_name = getattr(raw.state, "name", str(raw.state))
-        guid = getattr(raw, "guid", None)
-        levels_completed = getattr(raw, "levels_completed", 0)
-        win_levels = getattr(raw, "win_levels", 0)
-        print(
-            "input_frame "
-            f"idx={self._debug_frame_counter} "
-            f"guid={guid} "
-            f"state={state_name} "
-            f"levels_completed={levels_completed} "
-            f"win_levels={win_levels} "
-            f"frame_count={frame_count} "
-            f"frame_shapes={shapes} "
-            f"deltas_between={deltas_between} "
-            f"first_last_delta={first_last_delta} "
-            f"available_actions={available_actions} "
-            f"final_grid_preview={preview}"
-        )
-        self._debug_frame_counter += 1
-
     def _extract_final_grid(self, raw: FrameDataRaw) -> tuple[tuple[int, ...], ...]:
         frames = getattr(raw, "frame", [])
         if not frames:
@@ -204,42 +152,6 @@ class ArcadeEnvironment:
         else:
             data = final
         return tuple(tuple(int(cell) for cell in row) for row in data)
-
-    def _normalize_grid(self, frame: Any) -> list[list[int]]:
-        if hasattr(frame, "tolist"):
-            frame = frame.tolist()
-        return [[int(cell) for cell in row] for row in (frame or [])]
-
-    def _grid_delta_count(self, before: list[list[int]], after: list[list[int]]) -> int:
-        if not before and not after:
-            return 0
-        max_rows = max(len(before), len(after))
-        max_cols = max(
-            max((len(row) for row in before), default=0),
-            max((len(row) for row in after), default=0),
-        )
-        changed = 0
-        for y in range(max_rows):
-            before_row = before[y] if y < len(before) else []
-            after_row = after[y] if y < len(after) else []
-            for x in range(max_cols):
-                before_value = before_row[x] if x < len(before_row) else None
-                after_value = after_row[x] if x < len(after_row) else None
-                if before_value != after_value:
-                    changed += 1
-        return changed
-
-    def _grid_preview(self, grid: list[list[int]], rows: int = 4, cols: int = 12) -> str:
-        if not grid:
-            return "[]"
-        preview_rows = []
-        for row in grid[:rows]:
-            head = row[:cols]
-            suffix = "..." if len(row) > cols else ""
-            preview_rows.append("[" + ",".join(str(cell) for cell in head) + suffix + "]")
-        if len(grid) > rows:
-            preview_rows.append("...")
-        return " ".join(preview_rows)
 
     def _map_status(self, state: Any) -> GameStatus:
         name = getattr(state, "name", str(state))

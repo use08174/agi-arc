@@ -183,6 +183,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         return next_observation
 
     def _choose_action(self, step_idx: int, observation: Observation, actions: list[Action]) -> Action:
+        original_actions = list(actions)
         actions = self._filter_useless_actions(observation, actions)
         force_exploration = self._should_force_exploration(step_idx, observation)
         actions = self._prefer_unseen_actions(observation, actions, force_exploration)
@@ -237,7 +238,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             force_exploration=force_exploration,
         )
         if action is None:
-            fallback = self._fallback_action(observation, actions)
+            fallback = self._fallback_action(observation, actions or original_actions)
             return self._trace_decision(step_idx, observation, fallback, "fallback", "no ranked frontier action")
         return self._trace_decision(step_idx, observation, action, "explorer", "frontier selection")
 
@@ -358,6 +359,7 @@ class GraphSearchAgent(ArcAgentRuntime):
 
     def _filter_useless_actions(self, observation: Observation, actions: list[Action]) -> list[Action]:
         filtered = []
+        retried = []
         for action in actions:
             if action.name in self.game_memory.restart_like_action_names or action.key in self.game_memory.restart_like_action_keys:
                 continue
@@ -371,6 +373,9 @@ class GraphSearchAgent(ArcAgentRuntime):
                 continue
             if self.graph.action_is_probably_useless(observation.state_key, action):
                 continue
+            if self.graph.action_was_tried(observation.state_key, action):
+                retried.append(action)
+                continue
             filtered.append(action)
         if filtered:
             return filtered
@@ -382,7 +387,16 @@ class GraphSearchAgent(ArcAgentRuntime):
             and action.name not in self.game_memory.undo_like_action_names
             and action.key not in self.game_memory.undo_like_action_keys
         ]
-        return non_meta or actions
+        unseen_non_meta = [
+            action
+            for action in non_meta
+            if not self.graph.action_was_tried(observation.state_key, action)
+        ]
+        if unseen_non_meta:
+            return unseen_non_meta
+        # If every action in this exact state has already been tried, the caller may still
+        # need a last-resort fallback to avoid returning no action at all.
+        return []
 
     def _learn_meta_action(self, transition: Transition) -> None:
         if transition.won or transition.reward_delta > 0:

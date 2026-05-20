@@ -94,6 +94,18 @@ class ExplorationPressureTest(unittest.TestCase):
 
         self.assertEqual([action.key for action in ordered], [fresh_click.key, stale_click.key])
 
+    def test_same_state_retried_action_is_filtered_out(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        observation = Observation(state_key="s0", frame=None, changed=True)  # type: ignore[arg-type]
+        tried = Action(name="ACTION1")
+        fresh = Action(name="ACTION2")
+        agent.graph.touch("s0")
+        agent.graph.nodes["s0"].outgoing[tried.key] = "s1"
+
+        filtered = agent._filter_useless_actions(observation, [tried, fresh])
+
+        self.assertEqual([action.key for action in filtered], [fresh.key])
+
 
 if __name__ == "__main__":
     unittest.main()

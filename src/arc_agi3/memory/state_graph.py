@@ -47,6 +47,12 @@ class StateGraph:
     def action_is_probably_useless(self, state_key: str, action: Action) -> bool:
         return self.noop_counts[(state_key, action.key)] > 0
 
+    def action_was_tried(self, state_key: str, action: Action) -> bool:
+        node = self.nodes.get(state_key)
+        if node is None:
+            return False
+        return action.key in node.outgoing
+
     def seen_successor(self, state_key: str, action: Action) -> str | None:
         node = self.nodes.get(state_key)
         if node is None:
