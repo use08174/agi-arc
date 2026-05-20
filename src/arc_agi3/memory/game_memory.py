@@ -146,6 +146,20 @@ class GameMemory:
             interaction_hints=[label for label, _ in hints.most_common(3)],
         )
 
+    def contextual_effect_profile(
+        self,
+        action_key: str,
+        *,
+        previous_action_key: str | None,
+        region_bias: str = "playfield",
+    ):
+        return self.action_effects.summary_for_context(
+            action_key,
+            previous_action_key=previous_action_key,
+            region_bias=region_bias,
+            latent_state=dict(self.world_model.latent_state_candidates),
+        )
+
     def _classify_change_kind(self, notes: dict[str, object]) -> str:
         changed_cells = int(notes.get("changed_cells", 0) or 0)
         nonzero_delta = int(notes.get("nonzero_delta", 0) or 0)

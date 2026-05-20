@@ -33,6 +33,7 @@ class FrontierExplorer:
         }
         needs_axis_discovery = len(known_axes) < 2
         ranked = []
+        previous_action_key = None
         for index, action in enumerate(actions):
             if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
@@ -42,11 +43,17 @@ class FrontierExplorer:
                 continue
             successor = graph.seen_successor(observation.state_key, action)
             profile = game_memory.semantic_profile(action.name, action.key)
+            contextual = game_memory.contextual_effect_profile(
+                action.key,
+                previous_action_key=previous_action_key,
+            )
             learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
             unseen_from_state = successor is None
             known_changed = action.key in game_memory.changed_action_keys or action.key in game_memory.promising_action_keys
             known_reward = profile.reward_total > 0
             known_collectible = profile.collectible_progress > 0
+            context_progress = contextual.progress_ratio if contextual is not None else 0.0
+            context_transform = contextual.dominant_transform if contextual is not None else "unknown"
             globally_noop = profile.uses >= 2 and profile.changed_uses == 0 and profile.reward_total <= 0
             terminal_loss = profile.terminal_losses > 0
             blocked = world.is_blocked_action(action)
@@ -83,6 +90,8 @@ class FrontierExplorer:
                     not moves_toward_item,
                     not known_reward,
                     not known_collectible,
+                    -context_progress,
+                    context_transform == "noop",
                     not known_changed,
                     learned_label == "noop" and learned_confidence >= 0.6,
                     not unseen_from_state,
@@ -111,6 +120,7 @@ class FrontierExplorer:
         ranked = []
         recent = set(recent_action_names)
         recent_keys = set(recent_action_keys)
+        previous_action_key = recent_action_keys[-1] if recent_action_keys else None
         for index, action in enumerate(actions):
             if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
@@ -123,11 +133,17 @@ class FrontierExplorer:
                 continue
             meaning = game_memory.learned_action_semantics.meaning_for(action.name)
             learned_label, learned_confidence = meaning.best_label
+            contextual = game_memory.contextual_effect_profile(
+                action.key,
+                previous_action_key=previous_action_key,
+            )
+            context_progress = contextual.progress_ratio if contextual is not None else 0.0
             ranked.append(
                 (
                     successor is not None,
                     action.key in recent_keys,
                     action.name in recent,
+                    -context_progress,
                     learned_label not in {"unknown"} and learned_confidence >= 0.6,
                     meaning.uses,
                     index,

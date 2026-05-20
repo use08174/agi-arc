@@ -291,6 +291,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             proposals,
             self.game_memory.world_model,
             force_exploration,
+            mode_action_keys=set(self.game_memory.experiments.mode_action_keys),
         )
         if selected is None:
             return

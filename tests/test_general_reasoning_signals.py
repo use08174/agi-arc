@@ -75,6 +75,14 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertIn("workspace_like", signature.semantic_roles)
         self.assertIn("prev=ACTION5", signature.context_key)
         self.assertIn("mode=select_color", signature.context_key)
+        contextual = model.summary_for_context(
+            "ACTION6|x=3,y=3",
+            previous_action_key="ACTION5",
+            region_bias="playfield",
+            latent_state={"workspace_signature": "5x5:3", "mode_state": "select_color"},
+        )
+        self.assertIsNotNone(contextual)
+        self.assertGreater(contextual.progress_ratio, 0.0)
 
     def test_parser_infers_reference_and_workspace_roles(self) -> None:
         parser = MapParser()

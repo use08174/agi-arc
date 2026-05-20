@@ -95,6 +95,36 @@ class ActionEffectModel:
     def summary_for(self, action_key: str) -> ActionEffectAggregate | None:
         return self.signatures.get(action_key)
 
+    def summary_for_context(
+        self,
+        action_key: str,
+        *,
+        previous_action_key: str | None,
+        region_bias: str,
+        latent_state: dict[str, str] | None,
+    ) -> ActionEffectAggregate | None:
+        latent_state = latent_state or {}
+        context_key = self.context_key_for(
+            previous_action_key=previous_action_key,
+            region_bias=region_bias,
+            latent_state=latent_state,
+        )
+        return self.signatures.get(f"{action_key}@@{context_key}")
+
+    def context_key_for(
+        self,
+        *,
+        previous_action_key: str | None,
+        region_bias: str,
+        latent_state: dict[str, str],
+    ) -> str:
+        dominant_workspace = latent_state.get("workspace_signature", "none")
+        dominant_mode = latent_state.get("mode_state", "none")
+        dominant_prev = previous_action_key or "none"
+        return (
+            f"prev={dominant_prev}|region={region_bias}|mode={dominant_mode}|workspace={dominant_workspace}"
+        )
+
     def _infer_signature(
         self,
         transition: Transition,
@@ -147,11 +177,10 @@ class ActionEffectModel:
         roles = tuple(
             sorted(role for role, items in semantic_region_roles.items() if isinstance(items, list) and items)
         )
-        dominant_workspace = latent_state.get("workspace_signature", "none")
-        dominant_mode = latent_state.get("mode_state", "none")
-        dominant_prev = previous_action_key or "none"
-        context_key = (
-            f"prev={dominant_prev}|region={region_bias}|mode={dominant_mode}|workspace={dominant_workspace}"
+        context_key = self.context_key_for(
+            previous_action_key=previous_action_key,
+            region_bias=region_bias,
+            latent_state=latent_state,
         )
         reversible = returned_previous or returned_initial
         return ActionEffectSignature(

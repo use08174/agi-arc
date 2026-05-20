@@ -53,18 +53,28 @@ class SimplePlanner:
             return [PlanStep(action=terminal_candidates[0], reason="following known terminal transition")]
 
         ranked = []
+        previous_action_key = None
+        if recent_states and hasattr(game_memory, "action_semantics"):
+            previous_action_key = None
         for action in actions:
             if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
             if action.name in game_memory.undo_like_action_names or action.key in game_memory.undo_like_action_keys:
                 continue
             profile = game_memory.semantic_profile(action.name, action.key)
+            contextual = game_memory.contextual_effect_profile(
+                action.key,
+                previous_action_key=previous_action_key,
+            )
             learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
             hints = set(profile.interaction_hints)
+            context_progress = contextual.progress_ratio if contextual is not None else 0.0
+            context_transform = contextual.dominant_transform if contextual is not None else "unknown"
             is_semantically_promising = (
                 profile.reward_total > 0
                 or profile.collectible_progress > 0
                 or bool(hints.intersection({"pickup_or_consume", "spawn_or_unlock", "board_or_room_transform"}))
+                or context_progress >= 0.34
             )
             is_new_frontier = graph.seen_successor(observation.state_key, action) is None
             is_promising = is_semantically_promising or (
@@ -89,6 +99,8 @@ class SimplePlanner:
                     graph.is_back_edge(observation.state_key, successor) if successor is not None else False,
                     graph.traversals_for(observation.state_key, action, successor) if successor is not None else 0,
                     graph.visits_for(successor) if successor is not None else 0,
+                    -context_progress,
+                    context_transform == "noop",
                     -profile.reward_total,
                     -profile.collectible_progress,
                     action.key,
