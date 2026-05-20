@@ -277,6 +277,28 @@ class ExperimentTest(unittest.TestCase):
 
         self.assertTrue(any(proposal.key == "probe_action:ACTION2" for proposal in proposals))
 
+    def test_rule_focus_can_reenable_probe_action_after_it_was_seen(self) -> None:
+        memory = GameMemory()
+        memory.world_model.rule_library.observe_transition(
+            memory.world_model,
+            Action(name="ACTION2"),
+            {
+                "changed_cells": 0,
+                "changed_playfield_cells": 0,
+                "interaction_hint": "unknown",
+                "region_bias": "unknown",
+            },
+        )
+
+        proposals = memory.experiments.available(
+            memory.world_model,
+            [Action(name="ACTION2")],
+            {"ACTION2"},
+            rule_focus_action_keys={"ACTION2"},
+        )
+
+        self.assertTrue(any(proposal.key == "probe_action:ACTION2" for proposal in proposals))
+
     def test_active_experiment_is_not_replaced_while_in_progress(self) -> None:
         manager = ExperimentManager(
             active=ExperimentProposal(key="collect_item:1,1", kind="collect_item", target=(1, 1))

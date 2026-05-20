@@ -299,6 +299,7 @@ class GraphSearchAgent(ArcAgentRuntime):
                 action.key,
                 previous_action_key=self.recent_action_keys[-1] if self.recent_action_keys else None,
             ),
+            rule_focus_action_keys=self.game_memory.world_model.rule_library.focus_action_keys(actions),
         )
         if not proposals:
             return
@@ -307,6 +308,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             self.game_memory.world_model,
             force_exploration,
             mode_action_keys=set(self.game_memory.experiments.mode_action_keys),
+            rule_priority_for=self.game_memory.world_model.rule_library.priority_for_proposal,
         )
         if selected is None:
             return

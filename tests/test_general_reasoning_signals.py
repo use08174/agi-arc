@@ -149,6 +149,41 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertTrue(signal.score > 0.0)
         self.assertIn("reference_workspace_alignment_improved", signal.reasons)
 
+    def test_world_model_builds_explicit_reference_and_region_rules(self) -> None:
+        from arc_agi3.memory.world_model import WorldModel
+
+        world = WorldModel()
+        world.update_from_observation(
+            {
+                "semantic_region_roles": {
+                    "reference_like": [{"bbox": {"width": 2, "height": 2}, "color": 2, "anchor": "top_left"}],
+                    "workspace_like": [{"bbox": {"width": 5, "height": 5}, "color": 3, "anchor": "middle_center"}],
+                },
+                "reference_workspace_match": {
+                    "reference_anchor": "top_left",
+                    "workspace_anchor": "middle_center",
+                    "alignment_score": 0.68,
+                },
+            }
+        )
+        world.learn_transition(
+            Action(name="ACTION5"),
+            before_notes={},
+            after_notes={
+                "interaction_hint": "board_or_room_transform",
+                "anchor_patch_changes": ["bottom_left"],
+                "changed_cells": 4,
+                "changed_playfield_cells": 4,
+                "region_bias": "playfield",
+            },
+            terminal_loss=False,
+        )
+
+        rule_lines = world.rule_library.lines(limit=8)
+        self.assertTrue(any("reference_for" in line for line in rule_lines))
+        self.assertTrue(any("mode_setting" in line for line in rule_lines))
+        self.assertTrue(any("affects_region" in line for line in rule_lines))
+
 
 if __name__ == "__main__":
     unittest.main()

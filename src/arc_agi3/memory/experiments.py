@@ -49,8 +49,10 @@ class ExperimentManager:
         actions: list[Action],
         seen_action_keys: set[str],
         family_for: Any | None = None,
+        rule_focus_action_keys: set[str] | None = None,
     ) -> list[ExperimentProposal]:
         proposals: list[ExperimentProposal] = []
+        rule_focus_action_keys = rule_focus_action_keys or set()
         for target in sorted(world.visible_item_cells)[:6]:
             self._append_if_new(
                 proposals,
@@ -145,7 +147,7 @@ class ExperimentManager:
                 ),
             )
         for action in actions:
-            if action.key in seen_action_keys:
+            if action.key in seen_action_keys and action.key not in rule_focus_action_keys:
                 continue
             self._append_if_new(
                 proposals,

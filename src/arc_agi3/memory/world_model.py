@@ -6,6 +6,7 @@ from typing import Any
 
 from arc_agi3.core.types import Action
 from arc_agi3.memory.hypotheses import HypothesisLibrary
+from arc_agi3.memory.rules import RuleLibrary
 
 Cell = tuple[int, int]
 Edge = tuple[Cell, str]
@@ -154,6 +155,7 @@ class WorldModel:
     recent_events: list[SceneEvent] = field(default_factory=list)
     hypotheses: dict[str, GoalHypothesis] = field(default_factory=dict)
     hypothesis_library: HypothesisLibrary = field(default_factory=HypothesisLibrary)
+    rule_library: RuleLibrary = field(default_factory=RuleLibrary)
     relation_candidates: list[str] = field(default_factory=list)
     relation_details: dict[str, RelationCandidate] = field(default_factory=dict)
     anchor_patch_states: dict[str, str] = field(default_factory=dict)
@@ -235,6 +237,7 @@ class WorldModel:
             self._update_blocking_affordances()
         self._update_latent_state_candidates(notes)
         self.hypothesis_library.observe_scene(self)
+        self.rule_library.observe_scene(self)
         self._support_region_role_hypotheses()
 
     def learn_transition(self, action: Action, before_notes: dict[str, Any], after_notes: dict[str, Any], terminal_loss: bool) -> None:
@@ -270,6 +273,7 @@ class WorldModel:
         self._learn_events_and_hypotheses(before_notes, after_notes)
         self._learn_affordances(before_notes, after_notes)
         self.hypothesis_library.observe_transition(self, after_notes)
+        self.rule_library.observe_transition(self, action, after_notes)
 
     def predicted_target(self, pos: Cell | None, action_name: str) -> Cell | None:
         if pos is None:
@@ -404,6 +408,9 @@ class WorldModel:
                 rendered_hypotheses.append(f"{hypothesis.name}:{hypothesis.confidence:.2f}")
             lines.append("goal_hypotheses=" + " | ".join(rendered_hypotheses))
         lines.append("hypothesis_families=" + " | ".join(f"{item.name}:{item.confidence:.2f}" for item in self.hypothesis_library.ranked()[:6]))
+        rule_lines = self.rule_library.lines(limit=4)
+        if rule_lines:
+            lines.append("rules=" + " | ".join(rule_lines))
         return lines
 
     def event_lines(self, limit: int = 10) -> list[str]:
