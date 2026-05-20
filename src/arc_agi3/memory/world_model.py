@@ -165,6 +165,7 @@ class WorldModel:
     reference_workspace_match: dict[str, Any] | None = None
     latent_state_candidates: dict[str, str] = field(default_factory=dict)
     latent_state_confidence: dict[str, float] = field(default_factory=dict)
+    last_latent_transition: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
     last_objects: list[dict[str, Any]] = field(default_factory=list)
     last_notes: dict[str, Any] = field(default_factory=dict)
     goal_attempts_without_reward: int = 0
@@ -269,11 +270,26 @@ class WorldModel:
                 self.deadly_edges.add((before_player, action.name))
                 self.known_hazard_cells.add(target)
 
+        before_latent, _ = self.infer_latent_state_candidates(before_notes)
+        after_latent, _ = self.infer_latent_state_candidates(after_notes)
+        self.last_latent_transition = {
+            key: (before_latent.get(key), after_latent.get(key))
+            for key in set(before_latent) | set(after_latent)
+            if before_latent.get(key) != after_latent.get(key)
+        }
+
         self._learn_object_rules(action, before_notes, after_notes)
         self._learn_events_and_hypotheses(before_notes, after_notes)
         self._learn_affordances(before_notes, after_notes)
         self.hypothesis_library.observe_transition(self, after_notes)
-        self.rule_library.observe_transition(self, action, after_notes)
+        self.rule_library.observe_transition(
+            self,
+            action,
+            before_notes,
+            after_notes,
+            before_latent=before_latent,
+            after_latent=after_latent,
+        )
 
     def predicted_target(self, pos: Cell | None, action_name: str) -> Cell | None:
         if pos is None:
@@ -583,17 +599,40 @@ class WorldModel:
             )
 
     def _update_latent_state_candidates(self, notes: dict[str, Any]) -> None:
+        candidates, confidences = self.infer_latent_state_candidates(notes)
+        for name, value in candidates.items():
+            self.latent_state_candidates[name] = value
+            self.latent_state_confidence[name] = max(
+                self.latent_state_confidence.get(name, 0.0),
+                confidences.get(name, 0.0),
+            )
+
+    def infer_latent_state_candidates(self, notes: dict[str, Any]) -> tuple[dict[str, str], dict[str, float]]:
         interaction_hint = str(notes.get("interaction_hint", "unknown"))
         anchor_changes = list(notes.get("anchor_patch_changes", []) or [])
-        workspace_like = self.region_roles.get("workspace_like", [])
-        reference_like = self.region_roles.get("reference_like", [])
-        control_like = self.region_roles.get("control_like", [])
+        semantic_player_moved = bool(notes.get("semantic_player_moved", False))
+        changed_playfield_cells = int(notes.get("changed_playfield_cells", 0) or 0)
+        changed_cells = int(notes.get("changed_cells", 0) or 0)
+        region_roles = {
+            str(role): [item for item in items if isinstance(item, dict)]
+            for role, items in (notes.get("semantic_region_roles", {}) or {}).items()
+            if isinstance(items, list)
+        }
+        workspace_like = region_roles.get("workspace_like", [])
+        reference_like = region_roles.get("reference_like", [])
+        control_like = region_roles.get("control_like", [])
+        match = notes.get("reference_workspace_match")
+        reference_workspace_match = match if isinstance(match, dict) else None
+        candidates: dict[str, str] = {}
+        confidences: dict[str, float] = {}
+
         if control_like:
-            self.latent_state_candidates["control_mode"] = control_like[0].get("anchor", "control")
-            self.latent_state_confidence["control_mode"] = max(
-                self.latent_state_confidence.get("control_mode", 0.0),
-                0.35,
-            )
+            control_anchor = str(control_like[0].get("anchor", "control"))
+            candidates["control_mode"] = control_anchor
+            confidences["control_mode"] = 0.35
+            control_color = str(control_like[0].get("color", "unknown"))
+            candidates["selected_color"] = f"color:{control_color}"
+            confidences["selected_color"] = 0.25 if not anchor_changes else 0.45
         if workspace_like:
             workspace = workspace_like[0]
             signature = (
@@ -601,11 +640,8 @@ class WorldModel:
                 f"{workspace.get('bbox', {}).get('height', 0)}:"
                 f"{workspace.get('color', 0)}"
             )
-            self.latent_state_candidates["workspace_signature"] = signature
-            self.latent_state_confidence["workspace_signature"] = max(
-                self.latent_state_confidence.get("workspace_signature", 0.0),
-                0.40,
-            )
+            candidates["workspace_signature"] = signature
+            confidences["workspace_signature"] = 0.40
         if reference_like:
             reference = reference_like[0]
             signature = (
@@ -613,25 +649,35 @@ class WorldModel:
                 f"{reference.get('bbox', {}).get('height', 0)}:"
                 f"{reference.get('color', 0)}"
             )
-            self.latent_state_candidates["reference_signature"] = signature
-            self.latent_state_confidence["reference_signature"] = max(
-                self.latent_state_confidence.get("reference_signature", 0.0),
-                0.40,
-            )
-        if self.reference_workspace_match is not None:
-            score = float(self.reference_workspace_match.get("alignment_score", 0.0) or 0.0)
+            candidates["reference_signature"] = signature
+            confidences["reference_signature"] = 0.40
+        if reference_workspace_match is not None:
+            score = float(reference_workspace_match.get("alignment_score", 0.0) or 0.0)
             if score > 0.0:
-                self.latent_state_candidates["edit_structure"] = "reference_workspace_pair"
-                self.latent_state_confidence["edit_structure"] = max(
-                    self.latent_state_confidence.get("edit_structure", 0.0),
-                    min(0.9, 0.30 + score * 0.55),
-                )
+                candidates["edit_structure"] = "reference_workspace_pair"
+                confidences["edit_structure"] = min(0.9, 0.30 + score * 0.55)
         if anchor_changes or interaction_hint in {"spawn_or_unlock", "board_or_room_transform"}:
-            self.latent_state_candidates["mode_state"] = interaction_hint if interaction_hint != "unknown" else "panel_shift"
-            self.latent_state_confidence["mode_state"] = max(
-                self.latent_state_confidence.get("mode_state", 0.0),
-                0.55,
-            )
+            candidates["mode_state"] = interaction_hint if interaction_hint != "unknown" else "panel_shift"
+            confidences["mode_state"] = 0.55
+        if semantic_player_moved and changed_playfield_cells == 0:
+            candidates["selected_tool"] = "move"
+            confidences["selected_tool"] = 0.30
+        elif changed_playfield_cells > 0 and not semantic_player_moved:
+            candidates["selected_tool"] = "edit"
+            confidences["selected_tool"] = 0.42
+        elif interaction_hint in {"spawn_or_unlock", "board_or_room_transform"}:
+            candidates["selected_tool"] = "toggle"
+            confidences["selected_tool"] = 0.38
+        if changed_cells == 0 and interaction_hint == "unknown" and control_like:
+            candidates["mode_state"] = "armed_control"
+            confidences["mode_state"] = max(confidences.get("mode_state", 0.0), 0.28)
+        if self.goal_deferred:
+            candidates["gate_state"] = "goal_deferred"
+            confidences["gate_state"] = 0.40
+        elif bool(notes.get("collectible_progress", False)) or anchor_changes:
+            candidates["gate_state"] = "progressed"
+            confidences["gate_state"] = 0.35
+        return candidates, confidences
 
     def _learn_events_and_hypotheses(self, before_notes: dict[str, Any], after_notes: dict[str, Any]) -> None:
         removed = list((after_notes.get("collectible_changes", {}) or {}).get("removed", []) or [])

@@ -132,6 +132,8 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertIn("workspace_signature", world.latent_state_candidates)
         self.assertIn("reference_signature", world.latent_state_candidates)
         self.assertIn("mode_state", world.latent_state_candidates)
+        self.assertIn("selected_color", world.latent_state_candidates)
+        self.assertIn("selected_tool", world.latent_state_candidates)
 
     def test_progress_model_rewards_reference_workspace_alignment_improvement(self) -> None:
         model = ProgressModel()
@@ -184,6 +186,8 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertTrue(any("reference_for" in line for line in rule_lines))
         self.assertTrue(any("mode_setting" in line for line in rule_lines))
         self.assertTrue(any("affects_region" in line for line in rule_lines))
+        self.assertTrue(any("sets_mode" in line for line in rule_lines))
+        self.assertTrue(any("changes_variable" in line for line in rule_lines))
 
     def test_effect_uncertainty_drops_after_consistent_observations(self) -> None:
         ensemble = ActionEffectEnsemble()

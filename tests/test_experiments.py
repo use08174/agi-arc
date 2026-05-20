@@ -282,6 +282,7 @@ class ExperimentTest(unittest.TestCase):
         memory.world_model.rule_library.observe_transition(
             memory.world_model,
             Action(name="ACTION2"),
+            {},
             {
                 "changed_cells": 0,
                 "changed_playfield_cells": 0,

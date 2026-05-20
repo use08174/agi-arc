@@ -69,7 +69,17 @@ class RuleLibrary:
         elif alignment_score < 0.20:
             rule.contradict(f"weak_alignment={alignment_score:.2f}")
 
-    def observe_transition(self, world: Any, action: Action, after_notes: dict[str, Any]) -> None:
+    def observe_transition(
+        self,
+        world: Any,
+        action: Action,
+        before_notes: dict[str, Any],
+        after_notes: dict[str, Any],
+        before_latent: dict[str, str] | None = None,
+        after_latent: dict[str, str] | None = None,
+    ) -> None:
+        before_latent = before_latent or {}
+        after_latent = after_latent or {}
         interaction_hint = str(after_notes.get("interaction_hint", "unknown"))
         anchor_changes = list(after_notes.get("anchor_patch_changes", []) or [])
         semantic_player_moved = bool(after_notes.get("semantic_player_moved", False))
@@ -77,6 +87,11 @@ class RuleLibrary:
         changed_playfield_cells = int(after_notes.get("changed_playfield_cells", 0) or 0)
         region_bias = str(after_notes.get("region_bias", "unknown"))
         alignment_delta = float(after_notes.get("reference_workspace_alignment_delta", 0.0) or 0.0)
+        latent_changes = {
+            key: (before_latent.get(key), after_latent.get(key))
+            for key in set(before_latent) | set(after_latent)
+            if before_latent.get(key) != after_latent.get(key) and after_latent.get(key) is not None
+        }
 
         mode_rule = self._get_or_create("mode_setting", action.key, "latent_mode")
         if (
@@ -93,6 +108,20 @@ class RuleLibrary:
         elif changed_cells == 0 and interaction_hint == "unknown":
             mode_rule.contradict("noop_without_mode_evidence")
 
+        for variable_name, (_, after_value) in latent_changes.items():
+            if after_value is None:
+                continue
+            variable_rule = self._get_or_create("changes_variable", action.key, variable_name)
+            variable_rule.support(f"{variable_name}={after_value}")
+            if variable_name in {"mode_state", "selected_tool", "selected_color", "control_mode"}:
+                set_rule = self._get_or_create("sets_mode", action.key, str(after_value))
+                set_rule.support(f"{variable_name}={after_value}")
+
+        if not latent_changes and changed_cells == 0 and interaction_hint == "unknown":
+            for variable_name in ("mode_state", "selected_tool", "selected_color", "control_mode"):
+                self._get_or_create("changes_variable", action.key, variable_name).contradict("no_latent_delta")
+            mode_rule.contradict("no_latent_delta")
+
         affect_target = "workspace" if alignment_delta != 0 else region_bias
         affect_rule = self._get_or_create("affects_region", action.key, affect_target)
         if changed_playfield_cells > 0 or alignment_delta != 0:
@@ -107,7 +136,7 @@ class RuleLibrary:
         ranked = [
             rule
             for rule in self.rules.values()
-            if rule.category in {"mode_setting", "affects_region"} and rule.subject in available
+            if rule.category in {"mode_setting", "affects_region", "sets_mode", "changes_variable"} and rule.subject in available
         ]
         ranked.sort(
             key=lambda rule: (
@@ -159,7 +188,7 @@ class RuleLibrary:
         priorities = [
             rule.uncertainty
             for rule in self.rules.values()
-            if rule.subject == action_key and rule.category in {"mode_setting", "affects_region"}
+            if rule.subject == action_key and rule.category in {"mode_setting", "affects_region", "sets_mode", "changes_variable"}
         ]
         return max(priorities, default=0.0)
 
