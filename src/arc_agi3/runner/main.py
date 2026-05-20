@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from arc_agi3.core.runtime_env import bootstrap_runtime_env
@@ -25,10 +26,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--render-mode", default=None)
     parser.add_argument("--environments-dir", default="environment_files")
     parser.add_argument("--recordings-dir", default="recordings")
-    parser.add_argument("--max-steps", type=int, default=128)
-    parser.add_argument("--explore-steps", type=int, default=24)
-    parser.add_argument("--novelty-patience-steps", type=int, default=6)
-    parser.add_argument("--revisit-limit", type=int, default=3)
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=int(os.getenv("ARC_AGI3_MAX_STEPS", "128")),
+    )
+    parser.add_argument(
+        "--explore-steps",
+        type=int,
+        default=int(os.getenv("ARC_AGI3_EXPLORE_STEPS", "24")),
+    )
+    parser.add_argument(
+        "--novelty-patience-steps",
+        type=int,
+        default=int(os.getenv("ARC_AGI3_NOVELTY_PATIENCE_STEPS", "6")),
+    )
+    parser.add_argument(
+        "--revisit-limit",
+        type=int,
+        default=int(os.getenv("ARC_AGI3_REVISIT_LIMIT", "3")),
+    )
     parser.add_argument("--list-games", action="store_true")
     parser.add_argument("--save-recording", action="store_true")
     return parser.parse_args()

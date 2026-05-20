@@ -78,8 +78,16 @@ def parse_args() -> argparse.Namespace:
         default="skip",
     )
     parser.add_argument("--wheel-dir", default=None)
-    parser.add_argument("--max-steps", type=int, default=128)
-    parser.add_argument("--explore-steps", type=int, default=24)
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=int(os.getenv("ARC_AGI3_MAX_STEPS", "128")),
+    )
+    parser.add_argument(
+        "--explore-steps",
+        type=int,
+        default=int(os.getenv("ARC_AGI3_EXPLORE_STEPS", "24")),
+    )
     parser.add_argument("--list-games", action="store_true")
     parser.add_argument("--save-recording", action="store_true")
     return parser.parse_args()
