@@ -87,8 +87,14 @@ class SimplePlanner:
             alignment_success = game_memory.action_alignment_success_rate(action.key)
             family_alignment_score = game_memory.family_alignment_score(family)
             family_alignment_success = game_memory.family_alignment_success_rate(family)
+            uncertainty = game_memory.uncertainty_score(
+                action.name,
+                action.key,
+                previous_action_key=previous_action_key,
+            )
             recent_key_pressure = recent_key_counts.get(action.key, 0)
             recent_family_pressure = recent_family_counts.get(family, 0)
+            is_new_frontier = graph.seen_successor(observation.state_key, action) is None
             is_semantically_promising = (
                 profile.reward_total > 0
                 or profile.collectible_progress > 0
@@ -96,8 +102,8 @@ class SimplePlanner:
                 or context_progress >= 0.34
                 or alignment_score > 0.02
                 or family_alignment_score > 0.015
+                or (uncertainty >= 0.55 and is_new_frontier)
             )
-            is_new_frontier = graph.seen_successor(observation.state_key, action) is None
             is_promising = is_semantically_promising or (
                 is_new_frontier and action.key in game_memory.promising_action_keys
             )
@@ -130,6 +136,7 @@ class SimplePlanner:
                     -family_alignment_score,
                     -alignment_success,
                     -family_alignment_success,
+                    -(0.5 * uncertainty),
                     -context_progress,
                     context_transform == "noop",
                     -profile.reward_total,

@@ -47,6 +47,11 @@ class FrontierExplorer:
                 action.key,
                 previous_action_key=previous_action_key,
             )
+            uncertainty = game_memory.uncertainty_score(
+                action.name,
+                action.key,
+                previous_action_key=previous_action_key,
+            )
             learned_label, learned_confidence = game_memory.learned_action_semantics.meaning_for(action.name).best_label
             unseen_from_state = successor is None
             known_changed = action.key in game_memory.changed_action_keys or action.key in game_memory.promising_action_keys
@@ -90,6 +95,7 @@ class FrontierExplorer:
                     not moves_toward_item,
                     not known_reward,
                     not known_collectible,
+                    -uncertainty if force_exploration else 0.0,
                     -context_progress,
                     context_transform == "noop",
                     not known_changed,
@@ -138,11 +144,17 @@ class FrontierExplorer:
                 previous_action_key=previous_action_key,
             )
             context_progress = contextual.progress_ratio if contextual is not None else 0.0
+            uncertainty = game_memory.uncertainty_score(
+                action.name,
+                action.key,
+                previous_action_key=previous_action_key,
+            )
             ranked.append(
                 (
                     successor is not None,
                     action.key in recent_keys,
                     action.name in recent,
+                    -uncertainty,
                     -context_progress,
                     learned_label not in {"unknown"} and learned_confidence >= 0.6,
                     meaning.uses,

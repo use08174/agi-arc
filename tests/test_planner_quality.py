@@ -131,6 +131,41 @@ class PlannerQualityTest(unittest.TestCase):
 
         self.assertEqual(plan[0].action.key, action_b.key)
 
+    def test_planner_can_pick_high_uncertainty_action(self) -> None:
+        memory = GameMemory()
+        graph = StateGraph()
+        certain = Action(name="ACTION1")
+        uncertain = Action(name="ACTION2")
+        memory.remember_effect(certain.name, certain.key, "changed_state")
+        memory.remember_effect(uncertain.name, uncertain.key, "changed_state")
+        for _ in range(4):
+            memory.effect_uncertainty.observe(
+                action_key=certain.key,
+                family=memory.action_family(certain.name, certain.key),
+                previous_action_key=None,
+                region_bias="playfield",
+                mode_state="none",
+                workspace_signature="none",
+                transform_kind="movement",
+                interaction_hint="unknown",
+                alignment_delta=0.0,
+            )
+        observation = Observation(
+            state_key="s0",
+            frame=Frame(grid=((0,),)),
+            changed=True,
+        )
+
+        plan = SimplePlanner().build_plan(
+            observation=observation,
+            actions=[certain, uncertain],
+            graph=graph,
+            game_memory=memory,
+            recent_states=set(),
+        )
+
+        self.assertEqual(plan[0].action.key, uncertain.key)
+
 
 if __name__ == "__main__":
     unittest.main()

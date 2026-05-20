@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from arc_agi3.core.types import ActionSemanticProfile, RuleHypothesis
 from arc_agi3.memory.action_effects import ActionEffectModel
+from arc_agi3.memory.effect_uncertainty import ActionEffectEnsemble
 from arc_agi3.memory.action_semantics import ActionSemanticsModel
 from arc_agi3.memory.experiments import ExperimentManager
 from arc_agi3.memory.progress_model import ProgressModel
@@ -48,6 +49,7 @@ class GameMemory:
     action_family_alignment_positive_counts: dict[str, int] = field(default_factory=dict)
     learned_action_semantics: ActionSemanticsModel = field(default_factory=ActionSemanticsModel)
     action_effects: ActionEffectModel = field(default_factory=ActionEffectModel)
+    effect_uncertainty: ActionEffectEnsemble = field(default_factory=ActionEffectEnsemble)
     progress_model: ProgressModel = field(default_factory=ProgressModel)
     world_model: WorldModel = field(default_factory=WorldModel)
     experiments: ExperimentManager = field(default_factory=ExperimentManager)
@@ -247,6 +249,28 @@ class GameMemory:
         if transform == "noop":
             return "noop"
         return f"simple:{action_name}"
+
+    def uncertainty_score(
+        self,
+        action_name: str,
+        action_key: str,
+        *,
+        previous_action_key: str | None = None,
+        region_bias: str = "playfield",
+    ) -> float:
+        return self.effect_uncertainty.uncertainty_score(
+            action_key=action_key,
+            family=self.action_family(
+                action_name,
+                action_key,
+                previous_action_key=previous_action_key,
+                region_bias=region_bias,
+            ),
+            previous_action_key=previous_action_key,
+            region_bias=region_bias,
+            mode_state=self.world_model.latent_state_candidates.get("mode_state", "none"),
+            workspace_signature=self.world_model.latent_state_candidates.get("workspace_signature", "none"),
+        )
 
     def _classify_change_kind(self, notes: dict[str, object]) -> str:
         changed_cells = int(notes.get("changed_cells", 0) or 0)

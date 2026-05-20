@@ -190,6 +190,17 @@ class GraphSearchAgent(ArcAgentRuntime):
             alignment_delta=float(transition.notes.get("reference_workspace_alignment_delta", 0.0) or 0.0),
             family=current_family,
         )
+        self.game_memory.effect_uncertainty.observe(
+            action_key=action.key,
+            family=current_family,
+            previous_action_key=prior_action_key,
+            region_bias=str(transition.notes.get("region_bias", "playfield")),
+            mode_state=self.game_memory.world_model.latent_state_candidates.get("mode_state", "none"),
+            workspace_signature=self.game_memory.world_model.latent_state_candidates.get("workspace_signature", "none"),
+            transform_kind=signature.transform_kind,
+            interaction_hint=str(transition.notes.get("interaction_hint", "unknown")),
+            alignment_delta=float(transition.notes.get("reference_workspace_alignment_delta", 0.0) or 0.0),
+        )
         if semantic_progress:
             self.steps_since_semantic_progress = 0
         else:

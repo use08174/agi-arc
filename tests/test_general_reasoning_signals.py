@@ -4,6 +4,7 @@ import unittest
 
 from arc_agi3.core.types import Action, Frame, GameStatus, Transition
 from arc_agi3.memory.action_effects import ActionEffectModel
+from arc_agi3.memory.effect_uncertainty import ActionEffectEnsemble
 from arc_agi3.memory.progress_model import ProgressModel
 from arc_agi3.perception.map_parser import MapParser
 
@@ -183,6 +184,39 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertTrue(any("reference_for" in line for line in rule_lines))
         self.assertTrue(any("mode_setting" in line for line in rule_lines))
         self.assertTrue(any("affects_region" in line for line in rule_lines))
+
+    def test_effect_uncertainty_drops_after_consistent_observations(self) -> None:
+        ensemble = ActionEffectEnsemble()
+        before = ensemble.uncertainty_score(
+            action_key="ACTION3",
+            family="simple:ACTION3",
+            previous_action_key=None,
+            region_bias="playfield",
+            mode_state="none",
+            workspace_signature="none",
+        )
+        for _ in range(4):
+            ensemble.observe(
+                action_key="ACTION3",
+                family="simple:ACTION3",
+                previous_action_key=None,
+                region_bias="playfield",
+                mode_state="none",
+                workspace_signature="none",
+                transform_kind="movement",
+                interaction_hint="unknown",
+                alignment_delta=0.0,
+            )
+        after = ensemble.uncertainty_score(
+            action_key="ACTION3",
+            family="simple:ACTION3",
+            previous_action_key=None,
+            region_bias="playfield",
+            mode_state="none",
+            workspace_signature="none",
+        )
+
+        self.assertGreater(before, after)
 
 
 if __name__ == "__main__":
