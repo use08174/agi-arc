@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from arc_agi3.core.types import Action, ExperimentProposal, Observation, PlanStep
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.memory.state_graph import StateGraph
@@ -25,8 +27,12 @@ class SimplePlanner:
         graph: StateGraph,
         game_memory: GameMemory,
         recent_states: set[str],
+        recent_action_keys: list[str] | None = None,
+        recent_action_families: list[str] | None = None,
     ) -> list[PlanStep]:
         world = game_memory.world_model
+        recent_action_keys = recent_action_keys or []
+        recent_action_families = recent_action_families or []
         path = self.path_planner.plan_to_nearest_item_or_goal(world, actions)
         if path:
             return [PlanStep(action=path[0], reason="following BFS safe path to semantic target")]
@@ -56,6 +62,8 @@ class SimplePlanner:
         previous_action_key = None
         if recent_states and hasattr(game_memory, "action_semantics"):
             previous_action_key = None
+        recent_key_counts = Counter(recent_action_keys[-8:])
+        recent_family_counts = Counter(recent_action_families[-8:])
         for action in actions:
             if action.name in game_memory.restart_like_action_names or action.key in game_memory.restart_like_action_keys:
                 continue
@@ -79,6 +87,8 @@ class SimplePlanner:
             alignment_success = game_memory.action_alignment_success_rate(action.key)
             family_alignment_score = game_memory.family_alignment_score(family)
             family_alignment_success = game_memory.family_alignment_success_rate(family)
+            recent_key_pressure = recent_key_counts.get(action.key, 0)
+            recent_family_pressure = recent_family_counts.get(family, 0)
             is_semantically_promising = (
                 profile.reward_total > 0
                 or profile.collectible_progress > 0
@@ -108,8 +118,12 @@ class SimplePlanner:
                     successor is not None and successor == observation.state_key,
                     successor in recent_states if successor is not None else False,
                     graph.is_back_edge(observation.state_key, successor) if successor is not None else False,
+                    recent_family_pressure >= 4 and family_alignment_score <= 0.0 and context_progress < 0.25,
+                    recent_key_pressure >= 3 and alignment_score <= 0.0 and context_progress < 0.25,
                     alignment_score <= 0.0 and family_alignment_score <= 0.0 and context_progress < 0.20,
                     family_alignment_success <= 0.0 and alignment_success <= 0.0 and family in {"edit_or_mode", "simple:ACTION3", "simple:ACTION4", "simple:ACTION5"},
+                    recent_family_pressure,
+                    recent_key_pressure,
                     graph.traversals_for(observation.state_key, action, successor) if successor is not None else 0,
                     graph.visits_for(successor) if successor is not None else 0,
                     -alignment_score,

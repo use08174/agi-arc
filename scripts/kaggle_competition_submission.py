@@ -59,6 +59,7 @@ def prepare_official_repo(repo_dst: Path, agent_src: Path, agi_arc_repo: Path) -
         ARC_BASE_URL=http://gateway:8001
         ARC_API_KEY=test-key-123
         AGI_ARC_REPO={agi_arc_repo}
+        RECORDINGS_DIR=/kaggle/working/server_recording
         DEBUG=False
         """
     ).strip() + "\n"

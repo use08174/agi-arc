@@ -246,6 +246,8 @@ class GraphSearchAgent(ArcAgentRuntime):
                 graph=self.graph,
                 game_memory=self.game_memory,
                 recent_states=set(self.recent_states),
+                recent_action_keys=list(self.recent_action_keys),
+                recent_action_families=list(self.recent_action_families),
             )
             if plan:
                 step = plan[0]
@@ -346,7 +348,13 @@ class GraphSearchAgent(ArcAgentRuntime):
             return False
         if len(self.recent_actions) < 3:
             return False
-        return len(set(self.recent_actions)) <= 2
+        recent_keys = list(self.recent_action_keys)[-8:]
+        recent_families = list(self.recent_action_families)[-8:]
+        key_counts = Counter(recent_keys)
+        family_counts = Counter(recent_families)
+        dominant_key = key_counts.most_common(1)[0][1] if key_counts else 0
+        dominant_family = family_counts.most_common(1)[0][1] if family_counts else 0
+        return len(set(self.recent_actions)) <= 2 or dominant_key >= 5 or dominant_family >= 6
 
     def _should_force_exploration(self, step_idx: int, observation: Observation) -> bool:
         if step_idx < self.config.budget.explore_phase_steps:

@@ -106,6 +106,31 @@ class PlannerQualityTest(unittest.TestCase):
 
         self.assertEqual(plan[0].action.key, action_b.key)
 
+    def test_planner_penalizes_recent_dominant_action_without_alignment_signal(self) -> None:
+        memory = GameMemory()
+        graph = StateGraph()
+        action_a = Action(name="ACTION1")
+        action_b = Action(name="ACTION2")
+        for action in (action_a, action_b):
+            memory.remember_effect(action.name, action.key, "changed_state")
+        observation = Observation(
+            state_key="s0",
+            frame=Frame(grid=((0,),)),
+            changed=True,
+        )
+
+        plan = SimplePlanner().build_plan(
+            observation=observation,
+            actions=[action_a, action_b],
+            graph=graph,
+            game_memory=memory,
+            recent_states=set(),
+            recent_action_keys=["ACTION1"] * 6,
+            recent_action_families=["movement"] * 6,
+        )
+
+        self.assertEqual(plan[0].action.key, action_b.key)
+
 
 if __name__ == "__main__":
     unittest.main()
