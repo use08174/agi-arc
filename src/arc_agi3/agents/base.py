@@ -40,6 +40,7 @@ class ArcAgentRuntime:
         self.steps_since_new_state = 0
         self.steps_since_semantic_progress = 0
         self.click_no_progress_counts: dict[str, int] = {}
+        self.previous_action_context: dict[str, object] | None = None
 
     def reset_level(self) -> None:
         self.graph = StateGraph()
@@ -51,3 +52,4 @@ class ArcAgentRuntime:
         self.steps_since_new_state = 0
         self.steps_since_semantic_progress = 0
         self.click_no_progress_counts = {}
+        self.previous_action_context = None

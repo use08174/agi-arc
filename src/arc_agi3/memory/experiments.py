@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,6 +33,8 @@ class ExperimentManager:
         self.completed_keys = set(completed_keys or set())
         self.active_unplannable_steps = active_unplannable_steps
         self.active_session: ExperimentSession | None = None
+        self.mode_action_keys: set[str] = set()
+        self.macro_pair_counts: Counter[tuple[str, str]] = Counter()
         if active is not None:
             self.activate(active)
 
@@ -148,6 +151,18 @@ class ExperimentManager:
                     failure_signal="noop, undo, restart, or HUD-only effect",
                 ),
             )
+        for first_key, second_key in self._macro_pair_candidates([action.key for action in actions]):
+            self._append_if_new(
+                proposals,
+                ExperimentProposal(
+                    key=f"probe_action_pair:{first_key}->{second_key}",
+                    kind="probe_action_pair",
+                    target={"first_action_key": first_key, "second_action_key": second_key},
+                    rationale="some actions only become meaningful after a preceding setup or mode-setting action",
+                    expected_if_true="the paired action sequence produces a new nontrivial effect",
+                    failure_signal="the paired sequence still produces noop or feedback-only changes",
+                ),
+            )
         return proposals
 
     def activate(self, proposal: ExperimentProposal) -> None:
@@ -176,6 +191,19 @@ class ExperimentManager:
             session.repeated_action_count = 1
             session.last_action_key = action.key
         session.trial_count += 1
+
+    def remember_macro_effect(
+        self,
+        first_action_key: str,
+        second_action_key: str,
+        *,
+        mode_setting: bool,
+        productive: bool,
+    ) -> None:
+        if mode_setting:
+            self.mode_action_keys.add(first_action_key)
+        if productive:
+            self.macro_pair_counts[(first_action_key, second_action_key)] += 1
 
     def note_plan_result(self, plannable: bool, limit: int = 2) -> ExperimentOutcome | None:
         session = self.active_session
@@ -274,6 +302,31 @@ class ExperimentManager:
                 return ExperimentOutcome(proposal=proposal, status="confirmed", evidence="new_action_produced_non_feedback_state_change")
             return ExperimentOutcome(proposal=proposal, status="contradicted", evidence="action_produced_noop_or_feedback_only")
 
+        if proposal.kind == "probe_action_pair" and isinstance(proposal.target, dict):
+            first_key = str(proposal.target.get("first_action_key", ""))
+            second_key = str(proposal.target.get("second_action_key", ""))
+            if transition.action.key not in {first_key, second_key}:
+                return None
+            if session.step_count < 2:
+                return None
+            if transition.changed and not feedback and (
+                bool(after_notes.get("collectible_progress", False))
+                or bool(after_notes.get("anchor_patch_changes", []))
+                or interaction_hint not in {"unknown", "hud_or_counter_update"}
+            ):
+                return ExperimentOutcome(
+                    proposal=proposal,
+                    status="confirmed",
+                    evidence=f"paired_actions {first_key}->{second_key} produced {interaction_hint}",
+                )
+            if not transition.changed and interaction_hint in {"unknown", "hud_or_counter_update"}:
+                return ExperimentOutcome(
+                    proposal=proposal,
+                    status="contradicted",
+                    evidence=f"paired_actions {first_key}->{second_key} produced no useful effect",
+                )
+            return None
+
         if proposal.kind == "discover_axis" and isinstance(proposal.target, dict):
             if transition.action.key != proposal.target.get("action_key"):
                 return None
@@ -347,6 +400,11 @@ class ExperimentManager:
             return f"repeated_direct_interaction_without_goal_relevant_change trials={session.trial_count}"
         if proposal.kind == "go_to_goal":
             return "goal_deferred_or_no_reward_after_attempts"
+        if proposal.kind == "probe_action_pair" and isinstance(proposal.target, dict):
+            return (
+                "macro_pair_limit_reached "
+                f"{proposal.target.get('first_action_key')}->{proposal.target.get('second_action_key')}"
+            )
         return f"trial_limit_reached trials={session.trial_count} steps={session.step_count}"
 
     def _finish(self, outcome: ExperimentOutcome) -> ExperimentOutcome:
@@ -412,6 +470,8 @@ class ExperimentManager:
     def _max_trials(self, proposal: ExperimentProposal) -> int:
         if proposal.kind in {"probe_action", "discover_axis"}:
             return 1
+        if proposal.kind == "probe_action_pair":
+            return 2
         if proposal.kind in {"collect_item", "activate_button", "go_to_goal", "inspect_affordance"}:
             return 2
         return 3
@@ -419,6 +479,35 @@ class ExperimentManager:
     def _max_steps(self, proposal: ExperimentProposal) -> int:
         if proposal.kind in {"probe_action", "discover_axis"}:
             return 1
+        if proposal.kind == "probe_action_pair":
+            return 2
         if proposal.kind in {"collect_item", "activate_button", "go_to_goal", "inspect_affordance"}:
             return 3
         return 4
+
+    def _macro_pair_candidates(self, action_keys: list[str]) -> list[tuple[str, str]]:
+        candidates: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for (first_key, second_key), _ in sorted(
+            self.macro_pair_counts.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        ):
+            if first_key in action_keys and second_key in action_keys and (first_key, second_key) not in seen:
+                seen.add((first_key, second_key))
+                candidates.append((first_key, second_key))
+                if len(candidates) >= 3:
+                    return candidates
+        for first_key in sorted(self.mode_action_keys):
+            if first_key not in action_keys:
+                continue
+            for second_key in action_keys:
+                if second_key == first_key:
+                    continue
+                pair = (first_key, second_key)
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                candidates.append(pair)
+                if len(candidates) >= 3:
+                    return candidates
+        return candidates

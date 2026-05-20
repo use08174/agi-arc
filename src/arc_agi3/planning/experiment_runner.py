@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from arc_agi3.core.types import Action, ExperimentProposal, PlanStep
+from arc_agi3.memory.experiments import ExperimentSession
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.planning.path_planner import PathPlanner
 
@@ -10,6 +11,31 @@ class ExperimentRunner:
 
     def __init__(self) -> None:
         self.path_planner = PathPlanner()
+
+    def build_step_from_session(
+        self,
+        session: ExperimentSession | None,
+        actions: list[Action],
+        game_memory: GameMemory,
+    ) -> PlanStep | None:
+        if session is None:
+            return None
+        experiment = session.proposal
+        if experiment.kind == "probe_action_pair" and isinstance(experiment.target, dict):
+            first_key = str(experiment.target.get("first_action_key", ""))
+            second_key = str(experiment.target.get("second_action_key", ""))
+            target_key = first_key if session.step_count % 2 == 0 else second_key
+            for action in actions:
+                if action.key == target_key:
+                    return PlanStep(
+                        action=action,
+                        reason=(
+                            f"executing experiment {experiment.key} "
+                            f"step={'first' if target_key == first_key else 'second'}"
+                        ),
+                    )
+            return None
+        return self.build_step(experiment, actions, game_memory)
 
     def build_step(
         self,

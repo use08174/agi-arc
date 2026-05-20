@@ -179,6 +179,7 @@ class GraphSearchAgent(ArcAgentRuntime):
                 self.click_no_progress_counts.pop(action.key, None)
             else:
                 self.click_no_progress_counts[action.key] = self.click_no_progress_counts.get(action.key, 0) + 1
+        self._learn_macro_semantics(action, transition, progress_signal.score)
         self.recent_states.append(next_observation.state_key)
         return next_observation
 
@@ -189,8 +190,8 @@ class GraphSearchAgent(ArcAgentRuntime):
         actions = self._prefer_unseen_actions(observation, actions, force_exploration)
         actions = self._reprioritize_click_actions(actions)
         self._activate_experiment_if_idle(observation, actions, force_exploration)
-        experiment_step = self.experiment_runner.build_step(
-            experiment=self.game_memory.experiments.active,
+        experiment_step = self.experiment_runner.build_step_from_session(
+            session=self.game_memory.experiments.active_session,
             actions=actions,
             game_memory=self.game_memory,
         )
@@ -396,9 +397,10 @@ class GraphSearchAgent(ArcAgentRuntime):
         ]
         if unseen_non_meta:
             return unseen_non_meta
-        # If every action in this exact state has already been tried, the caller may still
-        # need a last-resort fallback to avoid returning no action at all.
-        return []
+        # If every action in this exact state has already been tried, fall back to the
+        # retried set so higher-level ranking/counterfactual logic can still choose
+        # the least-recent or least-looping option instead of hard-locking to one action.
+        return retried or non_meta or []
 
     def _would_repeat_recent_action_pattern(self, action: Action) -> bool:
         if self.steps_since_semantic_progress <= 0:
@@ -441,6 +443,41 @@ class GraphSearchAgent(ArcAgentRuntime):
             returned_previous=previous_state is not None and transition.to_state == previous_state,
             returned_initial=transition.to_state == getattr(self, "initial_state_key", None) and transition.from_state != transition.to_state,
         )
+
+    def _learn_macro_semantics(self, action: Action, transition: Transition, progress_score: float) -> None:
+        previous = self.previous_action_context
+        current_changed = bool(transition.changed)
+        current_productive = progress_score >= 0.45 or transition.reward_delta > 0 or transition.won
+        semantic_player_moved = bool(transition.notes.get("semantic_player_moved", False))
+        if previous is not None:
+            previous_key = str(previous.get("action_key", ""))
+            previous_progress = float(previous.get("progress_score", 0.0) or 0.0)
+            previous_changed = bool(previous.get("changed", False))
+            if previous_key:
+                mode_setting = (
+                    previous_progress < 0.2
+                    and not previous_changed
+                    and current_productive
+                    and not semantic_player_moved
+                )
+                productive_pair = (not semantic_player_moved) and (
+                    current_productive or (
+                        current_changed
+                        and str(transition.notes.get("interaction_hint", "unknown")) not in {"unknown", "hud_or_counter_update"}
+                    )
+                )
+                if mode_setting or productive_pair:
+                    self.game_memory.experiments.remember_macro_effect(
+                        previous_key,
+                        action.key,
+                        mode_setting=mode_setting,
+                        productive=productive_pair,
+                    )
+        self.previous_action_context = {
+            "action_key": action.key,
+            "progress_score": progress_score,
+            "changed": current_changed,
+        }
 
     def _fallback_action(self, observation: Observation, actions: list[Action]) -> Action:
         ranked = []

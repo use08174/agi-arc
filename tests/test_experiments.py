@@ -156,6 +156,48 @@ class ExperimentTest(unittest.TestCase):
 
         self.assertEqual(plan[0].action.name, "ACTION2")
 
+    def test_mode_setting_pair_creates_macro_experiment(self) -> None:
+        memory = GameMemory()
+        memory.experiments.remember_macro_effect(
+            "ACTION2",
+            "ACTION6|x=1,y=1",
+            mode_setting=True,
+            productive=True,
+        )
+
+        proposals = memory.experiments.available(
+            memory.world_model,
+            [Action(name="ACTION2"), Action(name="ACTION6", payload={"x": 1, "y": 1})],
+            set(),
+        )
+
+        self.assertTrue(any(proposal.kind == "probe_action_pair" for proposal in proposals))
+
+    def test_probe_action_pair_session_executes_two_step_macro(self) -> None:
+        memory = GameMemory()
+        memory.experiments.activate(
+            ExperimentProposal(
+                key="probe_action_pair:ACTION2->ACTION3",
+                kind="probe_action_pair",
+                target={"first_action_key": "ACTION2", "second_action_key": "ACTION3"},
+            )
+        )
+
+        step1 = SimplePlanner().experiment_runner.build_step_from_session(
+            memory.experiments.active_session,
+            [Action(name="ACTION2"), Action(name="ACTION3")],
+            memory,
+        )
+        memory.experiments.note_execution(step1.action)
+        step2 = SimplePlanner().experiment_runner.build_step_from_session(
+            memory.experiments.active_session,
+            [Action(name="ACTION2"), Action(name="ACTION3")],
+            memory,
+        )
+
+        self.assertEqual(step1.action.name, "ACTION2")
+        self.assertEqual(step2.action.name, "ACTION3")
+
     def test_interactable_affordance_creates_experiment(self) -> None:
         memory = GameMemory()
         world = memory.world_model
