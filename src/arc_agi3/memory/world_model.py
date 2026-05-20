@@ -163,6 +163,9 @@ class WorldModel:
     semantic_ascii_map: str = ""
     region_roles: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     reference_workspace_match: dict[str, Any] | None = None
+    relation_summary: dict[str, Any] = field(default_factory=dict)
+    relation_focus: list[str] = field(default_factory=list)
+    relation_snapshots: list[dict[str, Any]] = field(default_factory=list)
     latent_state_candidates: dict[str, str] = field(default_factory=dict)
     latent_state_confidence: dict[str, float] = field(default_factory=dict)
     last_latent_transition: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
@@ -181,6 +184,11 @@ class WorldModel:
         }
         match = notes.get("reference_workspace_match")
         self.reference_workspace_match = match if isinstance(match, dict) else None
+        relation_summary = notes.get("semantic_relation_summary")
+        self.relation_summary = relation_summary if isinstance(relation_summary, dict) else {}
+        self.relation_focus = [str(item) for item in (notes.get("semantic_relation_focus", []) or []) if item]
+        relation_snapshots = notes.get("semantic_relations")
+        self.relation_snapshots = [item for item in (relation_snapshots or []) if isinstance(item, dict)][:24]
         self.anchor_patch_states = {
             str(item.get("anchor")): str(item.get("signature"))
             for item in notes.get("anchor_patch_summary", []) or []
@@ -384,6 +392,16 @@ class WorldModel:
                 f"{self.reference_workspace_match.get('workspace_anchor')} "
                 f"score={float(self.reference_workspace_match.get('alignment_score', 0.0) or 0.0):.2f}"
             )
+        if self.relation_summary:
+            lines.append(
+                "relation_summary="
+                f"entities={int(self.relation_summary.get('entity_count', 0) or 0)} "
+                f"best_overlap={float(self.relation_summary.get('best_overlap_ratio', 0.0) or 0.0):.2f} "
+                f"best_align={float(self.relation_summary.get('best_alignment_score', 0.0) or 0.0):.2f} "
+                f"nearest_marker={float(self.relation_summary.get('nearest_marker_distance', -1) or -1):.0f}"
+            )
+        if self.relation_focus:
+            lines.append("relation_focus=" + " | ".join(self.relation_focus[:4]))
         if self.goal_deferred or self.goal_attempts_without_reward:
             lines.append(
                 f"goal_deferred={self.goal_deferred} goal_attempts_without_reward={self.goal_attempts_without_reward}"
@@ -597,6 +615,28 @@ class WorldModel:
                 0.05,
                 f"control_like={control_count} workspace_like={workspace_count}",
             )
+        if self.relation_summary:
+            nearest_marker = float(self.relation_summary.get("nearest_marker_distance", -1) or -1)
+            best_overlap = float(self.relation_summary.get("best_overlap_ratio", 0.0) or 0.0)
+            best_alignment = float(self.relation_summary.get("best_alignment_score", 0.0) or 0.0)
+            if nearest_marker >= 0:
+                self._support_hypothesis(
+                    "marker_alignment_objective_present",
+                    0.05,
+                    f"nearest_marker_distance={nearest_marker:.0f}",
+                )
+            if best_overlap >= 0.20:
+                self._support_hypothesis(
+                    "object_overlap_may_matter",
+                    0.04,
+                    f"best_overlap={best_overlap:.2f}",
+                )
+            if best_alignment >= 0.70:
+                self._support_hypothesis(
+                    "object_alignment_may_matter",
+                    0.04,
+                    f"best_alignment={best_alignment:.2f}",
+                )
 
     def _update_latent_state_candidates(self, notes: dict[str, Any]) -> None:
         candidates, confidences = self.infer_latent_state_candidates(notes)

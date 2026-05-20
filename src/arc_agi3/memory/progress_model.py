@@ -51,12 +51,35 @@ class ProgressModel:
             reasons.append("collectible_progress")
         reference_alignment = float(after_notes.get("reference_workspace_alignment_score", 0.0) or 0.0)
         reference_delta = float(after_notes.get("reference_workspace_alignment_delta", 0.0) or 0.0)
+        relation_same_color_improvement = float(after_notes.get("relation_nearest_same_color_improvement", 0.0) or 0.0)
+        relation_marker_improvement = float(after_notes.get("relation_nearest_marker_improvement", 0.0) or 0.0)
+        relation_overlap_delta = float(after_notes.get("relation_best_overlap_delta", 0.0) or 0.0)
+        relation_alignment_delta = float(after_notes.get("relation_best_alignment_delta", 0.0) or 0.0)
+        relation_containment_delta = float(after_notes.get("relation_best_containment_delta", 0.0) or 0.0)
         if reference_alignment > 0.0:
             semantic_change += min(0.20, reference_alignment * 0.20)
             reasons.append("reference_workspace_structure")
         if reference_delta > 0:
             goal_progress += min(0.45, reference_delta * 1.2)
             reasons.append("reference_workspace_alignment_improved")
+        if relation_same_color_improvement > 0:
+            goal_progress += min(0.18, relation_same_color_improvement / 12.0)
+            reasons.append("same_color_objects_closer")
+        if relation_marker_improvement > 0:
+            goal_progress += min(0.25, relation_marker_improvement / 10.0)
+            reasons.append("marker_alignment_improved")
+        if relation_overlap_delta > 0:
+            semantic_change += min(0.18, relation_overlap_delta * 0.8)
+            goal_progress += min(0.12, relation_overlap_delta * 0.5)
+            reasons.append("object_overlap_improved")
+        if relation_alignment_delta > 0:
+            semantic_change += min(0.16, relation_alignment_delta * 0.6)
+            goal_progress += min(0.14, relation_alignment_delta * 0.7)
+            reasons.append("object_alignment_improved")
+        if relation_containment_delta > 0:
+            semantic_change += min(0.14, relation_containment_delta * 0.5)
+            goal_progress += min(0.10, relation_containment_delta * 0.4)
+            reasons.append("containment_relation_improved")
         anchor_changes = list(after_notes.get("anchor_patch_changes", []) or [])
         if anchor_changes:
             semantic_change += 0.40

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from arc_agi3.core.types import Frame
+from arc_agi3.memory.object_relations import ObjectRelationModel
 from arc_agi3.perception.region_roles import RegionRoleInferer
 from arc_agi3.perception.region_matcher import RegionMatcher
 
@@ -27,6 +28,9 @@ class SemanticMap:
     ascii_map: str
     region_roles: dict[str, list[dict[str, Any]]]
     region_match: dict[str, Any] | None
+    relation_summary: dict[str, Any]
+    relation_focus: list[str]
+    relations: list[dict[str, Any]]
 
     def to_notes(self) -> dict[str, Any]:
         role_counts = Counter(str(obj.get("role", "unknown")) for obj in self.objects)
@@ -52,6 +56,9 @@ class SemanticMap:
             },
             "reference_workspace_match": self.region_match,
             "reference_workspace_alignment_score": float((self.region_match or {}).get("alignment_score", 0.0) or 0.0),
+            "semantic_relation_summary": self.relation_summary,
+            "semantic_relation_focus": self.relation_focus[:8],
+            "semantic_relations": self.relations[:16],
         }
 
 
@@ -66,6 +73,7 @@ class MapParser:
     def __init__(self) -> None:
         self.region_role_inferer = RegionRoleInferer()
         self.region_matcher = RegionMatcher()
+        self.object_relation_model = ObjectRelationModel()
 
     def parse(self, frame: Frame, previous: Frame | None = None, hud_rows: int | None = None) -> SemanticMap:
         grid = frame.grid
@@ -96,6 +104,14 @@ class MapParser:
             grid=grid,
             region_roles=region_roles,
         )
+        relation_snapshot = self.object_relation_model.infer(
+            objects=objects,
+            player=player,
+            items=items,
+            goals=goals,
+            buttons=buttons,
+            displays=displays,
+        )
         return SemanticMap(
             width=width,
             height=height,
@@ -112,6 +128,9 @@ class MapParser:
             ascii_map=ascii_map,
             region_roles=region_roles,
             region_match=region_match,
+            relation_summary=relation_snapshot.summary,
+            relation_focus=relation_snapshot.focus_relations,
+            relations=relation_snapshot.relations,
         )
 
     def _infer_hud_rows(self, frame: Frame) -> tuple[int, float]:

@@ -255,6 +255,18 @@ class StateHasher:
         moved = prev_pos is not None and curr_pos is not None and prev_pos != curr_pos
         prev_match_score = float((prev.region_match or {}).get("alignment_score", 0.0) or 0.0)
         curr_match_score = float((curr.region_match or {}).get("alignment_score", 0.0) or 0.0)
+        prev_relation = prev.relation_summary
+        curr_relation = curr.relation_summary
+        prev_same_color = float(prev_relation.get("nearest_same_color_distance", -1) or -1)
+        curr_same_color = float(curr_relation.get("nearest_same_color_distance", -1) or -1)
+        prev_marker = float(prev_relation.get("nearest_marker_distance", -1) or -1)
+        curr_marker = float(curr_relation.get("nearest_marker_distance", -1) or -1)
+        prev_overlap = float(prev_relation.get("best_overlap_ratio", 0.0) or 0.0)
+        curr_overlap = float(curr_relation.get("best_overlap_ratio", 0.0) or 0.0)
+        prev_alignment = float(prev_relation.get("best_alignment_score", 0.0) or 0.0)
+        curr_alignment = float(curr_relation.get("best_alignment_score", 0.0) or 0.0)
+        prev_containment = float(prev_relation.get("best_containment_score", 0.0) or 0.0)
+        curr_containment = float(curr_relation.get("best_containment_score", 0.0) or 0.0)
         return {
             "semantic_previous_player_pos": prev_pos,
             "semantic_player_pos": curr_pos,
@@ -267,7 +279,24 @@ class StateHasher:
                 - float((prev.region_match or {}).get("layout_similarity", 0.0) or 0.0),
                 4,
             ),
+            "relation_nearest_same_color_distance": curr_same_color,
+            "relation_nearest_same_color_improvement": round(self._distance_improvement(prev_same_color, curr_same_color), 4),
+            "relation_nearest_marker_distance": curr_marker,
+            "relation_nearest_marker_improvement": round(self._distance_improvement(prev_marker, curr_marker), 4),
+            "relation_best_overlap_ratio": curr_overlap,
+            "relation_best_overlap_delta": round(curr_overlap - prev_overlap, 4),
+            "relation_best_alignment_score": curr_alignment,
+            "relation_best_alignment_delta": round(curr_alignment - prev_alignment, 4),
+            "relation_best_containment_score": curr_containment,
+            "relation_best_containment_delta": round(curr_containment - prev_containment, 4),
+            "relation_focus_count": len(curr.relation_focus),
+            "relation_focus_delta": len(curr.relation_focus) - len(prev.relation_focus),
         }
+
+    def _distance_improvement(self, previous: float, current: float) -> float:
+        if previous < 0 or current < 0:
+            return 0.0
+        return previous - current
 
     def _collectible_changes(self, previous: Frame, current: Frame) -> dict[str, list[str]]:
         prev = {

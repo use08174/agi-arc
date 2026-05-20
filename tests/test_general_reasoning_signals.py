@@ -113,6 +113,29 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertIsNotNone(semantic.region_match)
         self.assertGreater(float((semantic.region_match or {}).get("alignment_score", 0.0) or 0.0), 0.0)
 
+    def test_parser_extracts_object_relations(self) -> None:
+        parser = MapParser()
+        frame = Frame(
+            grid=tuple(
+                tuple(
+                    2
+                    if (2 <= x <= 3 and 2 <= y <= 3) or (8 <= x <= 9 and 2 <= y <= 3)
+                    else 5
+                    if 4 <= x <= 7 and 7 <= y <= 10
+                    else 0
+                    for x in range(16)
+                )
+                for y in range(16)
+            ),
+            status=GameStatus.IN_PROGRESS,
+        )
+
+        semantic = parser.parse(frame)
+
+        self.assertGreaterEqual(int(semantic.relation_summary.get("entity_count", 0) or 0), 2)
+        self.assertGreaterEqual(float(semantic.relation_summary.get("nearest_same_color_distance", -1) or -1), 0.0)
+        self.assertTrue(any("aligned" in line or "horizontal_offset" in line for line in semantic.relation_focus))
+
     def test_world_model_tracks_latent_workspace_and_reference_candidates(self) -> None:
         from arc_agi3.memory.world_model import WorldModel
 
@@ -152,6 +175,25 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertTrue(signal.score > 0.0)
         self.assertIn("reference_workspace_alignment_improved", signal.reasons)
 
+    def test_progress_model_rewards_relation_improvement(self) -> None:
+        model = ProgressModel()
+        signal = model.score_transition(
+            transition=Transition(from_state="a", action=Action(name="ACTION3"), to_state="b", changed=True),
+            after_notes={
+                "relation_nearest_marker_improvement": 3.0,
+                "relation_best_overlap_delta": 0.2,
+                "relation_best_alignment_delta": 0.15,
+                "changed_playfield_cells": 4,
+            },
+            discovered_new_state=False,
+            experiment_outcome=None,
+        )
+
+        self.assertGreater(signal.score, 0.0)
+        self.assertIn("marker_alignment_improved", signal.reasons)
+        self.assertIn("object_overlap_improved", signal.reasons)
+        self.assertIn("object_alignment_improved", signal.reasons)
+
     def test_world_model_builds_explicit_reference_and_region_rules(self) -> None:
         from arc_agi3.memory.world_model import WorldModel
 
@@ -188,6 +230,26 @@ class GeneralReasoningSignalsTest(unittest.TestCase):
         self.assertTrue(any("affects_region" in line for line in rule_lines))
         self.assertTrue(any("sets_mode" in line for line in rule_lines))
         self.assertTrue(any("changes_variable" in line for line in rule_lines))
+
+    def test_world_model_supports_relation_hypotheses(self) -> None:
+        from arc_agi3.memory.world_model import WorldModel
+
+        world = WorldModel()
+        world.update_from_observation(
+            {
+                "semantic_relation_summary": {
+                    "entity_count": 4,
+                    "best_overlap_ratio": 0.24,
+                    "best_alignment_score": 0.82,
+                    "nearest_marker_distance": 3.0,
+                },
+                "semantic_relation_focus": ["item->goal kind=aligned dist=3 overlap=0.00 align=0.82"],
+            }
+        )
+
+        hypothesis_lines = world.hypothesis_lines(limit=12)
+        self.assertTrue(any("marker_alignment_objective_present" in line for line in hypothesis_lines))
+        self.assertTrue(any("object_alignment_may_matter" in line for line in hypothesis_lines))
 
     def test_effect_uncertainty_drops_after_consistent_observations(self) -> None:
         ensemble = ActionEffectEnsemble()
