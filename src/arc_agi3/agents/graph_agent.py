@@ -409,6 +409,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         filtered = []
         retried = []
         family_cooled = []
+        key_cooled = []
         for action in actions:
             if action.name in self.game_memory.restart_like_action_names or action.key in self.game_memory.restart_like_action_keys:
                 continue
@@ -424,6 +425,9 @@ class GraphSearchAgent(ArcAgentRuntime):
                 continue
             if self._would_repeat_recent_action_pattern(action):
                 continue
+            if self._action_is_on_cooldown(action):
+                key_cooled.append(action)
+                continue
             if self._would_repeat_recent_family_pattern(action) or self._family_is_on_cooldown(action):
                 family_cooled.append(action)
                 continue
@@ -433,6 +437,8 @@ class GraphSearchAgent(ArcAgentRuntime):
             filtered.append(action)
         if filtered:
             return filtered
+        if key_cooled:
+            return key_cooled
         if family_cooled:
             return family_cooled
         non_meta = [
@@ -510,7 +516,37 @@ class GraphSearchAgent(ArcAgentRuntime):
             recent_transforms[idx]
             for idx in low_progress_same_family
         }
+        family_alignment_score = self.game_memory.family_alignment_score(family)
+        family_alignment_success = self.game_memory.family_alignment_success_rate(family)
+        if family_alignment_score > 0.02 or family_alignment_success > 0.25:
+            return False
+        family_counts = Counter(list(self.recent_action_families)[-self.config.budget.recent_action_window :])
+        if family_counts.get(family, 0) >= max(4, self.config.budget.recent_action_window - 1):
+            return True
         return len(transform_matches) <= 2
+
+    def _action_is_on_cooldown(self, action: Action) -> bool:
+        if self.steps_since_semantic_progress < 2 or len(self.recent_action_keys) < 4:
+            return False
+        if action.key not in self.recent_action_keys:
+            return False
+        action_alignment_score = self.game_memory.action_alignment_score(action.key)
+        action_alignment_success = self.game_memory.action_alignment_success_rate(action.key)
+        if action_alignment_score > 0.02 or action_alignment_success > 0.25:
+            return False
+        recent_keys = list(self.recent_action_keys)[-self.config.budget.recent_action_window :]
+        recent_progress = list(self.recent_progress_scores)[-self.config.budget.recent_action_window :]
+        recent_transforms = list(self.recent_effect_transforms)[-self.config.budget.recent_action_window :]
+        matching_indices = [
+            idx
+            for idx, recent_key in enumerate(recent_keys)
+            if recent_key == action.key
+        ]
+        if len(matching_indices) < max(3, self.config.budget.recent_action_window - 2):
+            return False
+        mean_progress = sum(recent_progress[idx] for idx in matching_indices) / max(1, len(matching_indices))
+        transform_matches = {recent_transforms[idx] for idx in matching_indices}
+        return mean_progress < 0.2 and len(transform_matches) <= 2
 
     def _learn_meta_action(self, transition: Transition) -> None:
         if transition.won or transition.reward_delta > 0:

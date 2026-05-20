@@ -155,6 +155,39 @@ class ExplorationPressureTest(unittest.TestCase):
         self.assertTrue(agent._family_is_on_cooldown(Action(name="ACTION3")))
         self.assertFalse(agent._family_is_on_cooldown(Action(name="ACTION6", payload={"x": 1, "y": 1})))
 
+    def test_dominant_low_progress_action_gets_cooldown(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        agent.steps_since_semantic_progress = 4
+        agent.recent_action_keys.extend(
+            ["ACTION1", "ACTION1", "ACTION1", "ACTION1", "ACTION2", "ACTION1"]
+        )
+        agent.recent_effect_transforms.extend(
+            ["local_transform", "local_transform", "local_transform", "local_transform", "noop", "local_transform"]
+        )
+        agent.recent_progress_scores.extend([0.0, 0.05, 0.0, 0.1, 0.0, 0.0])
+
+        self.assertTrue(agent._action_is_on_cooldown(Action(name="ACTION1")))
+        self.assertFalse(agent._action_is_on_cooldown(Action(name="ACTION2")))
+
+    def test_filter_removes_recent_dominant_low_progress_action(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        observation = Observation(state_key="s0", frame=None, changed=True)  # type: ignore[arg-type]
+        agent.steps_since_semantic_progress = 4
+        agent.recent_action_keys.extend(
+            ["ACTION1", "ACTION1", "ACTION1", "ACTION1", "ACTION2", "ACTION1"]
+        )
+        agent.recent_effect_transforms.extend(
+            ["local_transform", "local_transform", "local_transform", "local_transform", "noop", "local_transform"]
+        )
+        agent.recent_progress_scores.extend([0.0, 0.05, 0.0, 0.1, 0.0, 0.0])
+
+        filtered = agent._filter_useless_actions(
+            observation,
+            [Action(name="ACTION1"), Action(name="ACTION6", payload={"x": 5, "y": 5})],
+        )
+
+        self.assertEqual([action.key for action in filtered], ["ACTION6|x=5,y=5"])
+
 
 if __name__ == "__main__":
     unittest.main()
