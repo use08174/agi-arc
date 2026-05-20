@@ -106,6 +106,23 @@ class ExplorationPressureTest(unittest.TestCase):
 
         self.assertEqual([action.key for action in filtered], [fresh.key])
 
+    def test_recent_two_action_loop_pattern_is_filtered(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        agent.steps_since_semantic_progress = 2
+        agent.recent_action_keys.extend(["ACTION1", "ACTION2", "ACTION1"])
+
+        self.assertTrue(agent._would_repeat_recent_action_pattern(Action(name="ACTION2")))
+        self.assertFalse(agent._would_repeat_recent_action_pattern(Action(name="ACTION3")))
+
+    def test_recent_three_action_loop_pattern_is_filtered(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        agent.steps_since_semantic_progress = 2
+        agent.recent_action_keys.extend(
+            ["ACTION1", "ACTION2", "ACTION3", "ACTION1", "ACTION2"]
+        )
+
+        self.assertTrue(agent._would_repeat_recent_action_pattern(Action(name="ACTION3")))
+
 
 if __name__ == "__main__":
     unittest.main()

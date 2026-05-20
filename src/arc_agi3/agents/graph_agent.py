@@ -373,6 +373,8 @@ class GraphSearchAgent(ArcAgentRuntime):
                 continue
             if self.graph.action_is_probably_useless(observation.state_key, action):
                 continue
+            if self._would_repeat_recent_action_pattern(action):
+                continue
             if self.graph.action_was_tried(observation.state_key, action):
                 retried.append(action)
                 continue
@@ -397,6 +399,18 @@ class GraphSearchAgent(ArcAgentRuntime):
         # If every action in this exact state has already been tried, the caller may still
         # need a last-resort fallback to avoid returning no action at all.
         return []
+
+    def _would_repeat_recent_action_pattern(self, action: Action) -> bool:
+        if self.steps_since_semantic_progress <= 0:
+            return False
+        sequence = list(self.recent_action_keys) + [action.key]
+        for pattern_len in (2, 3, 4):
+            window = pattern_len * 2
+            if len(sequence) < window:
+                continue
+            if sequence[-window:-pattern_len] == sequence[-pattern_len:]:
+                return True
+        return False
 
     def _learn_meta_action(self, transition: Transition) -> None:
         if transition.won or transition.reward_delta > 0:
