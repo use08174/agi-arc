@@ -36,6 +36,15 @@ class ArcAgentRuntime:
         self.recent_action_keys: deque[str] = deque(
             maxlen=self.config.budget.recent_action_window
         )
+        self.recent_action_families: deque[str] = deque(
+            maxlen=self.config.budget.recent_action_window
+        )
+        self.recent_effect_transforms: deque[str] = deque(
+            maxlen=self.config.budget.recent_action_window
+        )
+        self.recent_progress_scores: deque[float] = deque(
+            maxlen=self.config.budget.recent_action_window
+        )
         self.decision_traces: list[DecisionTrace] = []
         self.steps_since_new_state = 0
         self.steps_since_semantic_progress = 0
@@ -48,6 +57,9 @@ class ArcAgentRuntime:
         self.recent_states = deque(maxlen=self.config.budget.recent_state_window)
         self.recent_actions = deque(maxlen=self.config.budget.recent_action_window)
         self.recent_action_keys = deque(maxlen=self.config.budget.recent_action_window)
+        self.recent_action_families = deque(maxlen=self.config.budget.recent_action_window)
+        self.recent_effect_transforms = deque(maxlen=self.config.budget.recent_action_window)
+        self.recent_progress_scores = deque(maxlen=self.config.budget.recent_action_window)
         self.decision_traces = []
         self.steps_since_new_state = 0
         self.steps_since_semantic_progress = 0

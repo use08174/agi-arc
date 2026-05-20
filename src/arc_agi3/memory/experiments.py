@@ -35,6 +35,7 @@ class ExperimentManager:
         self.active_session: ExperimentSession | None = None
         self.mode_action_keys: set[str] = set()
         self.macro_pair_counts: Counter[tuple[str, str]] = Counter()
+        self.failed_macro_pairs: set[tuple[str, str]] = set()
         if active is not None:
             self.activate(active)
 
@@ -42,7 +43,13 @@ class ExperimentManager:
     def active(self) -> ExperimentProposal | None:
         return self.active_session.proposal if self.active_session is not None else None
 
-    def available(self, world: Any, actions: list[Action], seen_action_keys: set[str]) -> list[ExperimentProposal]:
+    def available(
+        self,
+        world: Any,
+        actions: list[Action],
+        seen_action_keys: set[str],
+        family_for: Any | None = None,
+    ) -> list[ExperimentProposal]:
         proposals: list[ExperimentProposal] = []
         for target in sorted(world.visible_item_cells)[:6]:
             self._append_if_new(
@@ -151,7 +158,7 @@ class ExperimentManager:
                     failure_signal="noop, undo, restart, or HUD-only effect",
                 ),
             )
-        for first_key, second_key in self._macro_pair_candidates([action.key for action in actions]):
+        for first_key, second_key in self._macro_pair_candidates(actions, family_for=family_for):
             self._append_if_new(
                 proposals,
                 ExperimentProposal(
@@ -408,6 +415,15 @@ class ExperimentManager:
         return f"trial_limit_reached trials={session.trial_count} steps={session.step_count}"
 
     def _finish(self, outcome: ExperimentOutcome) -> ExperimentOutcome:
+        if outcome.proposal.kind == "probe_action_pair" and isinstance(outcome.proposal.target, dict):
+            first_key = str(outcome.proposal.target.get("first_action_key", ""))
+            second_key = str(outcome.proposal.target.get("second_action_key", ""))
+            if (
+                first_key
+                and second_key
+                and outcome.status in {"contradicted", "abandoned"}
+            ):
+                self.failed_macro_pairs.add((first_key, second_key))
         self.history.append(outcome)
         self.completed_keys.add(outcome.proposal.key)
         self.active_session = None
@@ -485,14 +501,42 @@ class ExperimentManager:
             return 3
         return 4
 
-    def _macro_pair_candidates(self, action_keys: list[str]) -> list[tuple[str, str]]:
+    def _macro_pair_candidates(
+        self,
+        actions: list[Action],
+        family_for: Any | None = None,
+    ) -> list[tuple[str, str]]:
         candidates: list[tuple[str, str]] = []
         seen: set[tuple[str, str]] = set()
+        actions_by_key = {action.key: action for action in actions}
+        action_keys = list(actions_by_key)
+
+        def pair_is_valid(first_key: str, second_key: str) -> bool:
+            if not first_key or not second_key or first_key == second_key:
+                return False
+            if (first_key, second_key) in self.failed_macro_pairs:
+                return False
+            first_action = actions_by_key.get(first_key)
+            second_action = actions_by_key.get(second_key)
+            if first_action is None or second_action is None:
+                return False
+            if family_for is not None:
+                first_family = str(family_for(first_action))
+                second_family = str(family_for(second_action))
+                if first_family and second_family and first_family == second_family:
+                    return False
+            return True
+
         for (first_key, second_key), _ in sorted(
             self.macro_pair_counts.items(),
             key=lambda item: (-item[1], item[0][0], item[0][1]),
         ):
-            if first_key in action_keys and second_key in action_keys and (first_key, second_key) not in seen:
+            if (
+                first_key in action_keys
+                and second_key in action_keys
+                and (first_key, second_key) not in seen
+                and pair_is_valid(first_key, second_key)
+            ):
                 seen.add((first_key, second_key))
                 candidates.append((first_key, second_key))
                 if len(candidates) >= 3:
@@ -501,10 +545,8 @@ class ExperimentManager:
             if first_key not in action_keys:
                 continue
             for second_key in action_keys:
-                if second_key == first_key:
-                    continue
                 pair = (first_key, second_key)
-                if pair in seen:
+                if pair in seen or not pair_is_valid(first_key, second_key):
                     continue
                 seen.add(pair)
                 candidates.append(pair)

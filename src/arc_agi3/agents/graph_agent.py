@@ -112,6 +112,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         won: bool,
     ) -> Observation:
         before_notes = dict(observation.notes)
+        prior_action_key = self.recent_action_keys[-1] if self.recent_action_keys else None
         next_observation = self.hasher.observe(frame, previous=observation.frame)
         discovered_new_state = next_observation.state_key not in self.graph.nodes
         self.game_memory.world_model.update_from_observation(next_observation.notes)
@@ -146,8 +147,6 @@ class GraphSearchAgent(ArcAgentRuntime):
         self._learn_from_transition(transition)
         self._learn_meta_action(transition)
         self._learn_action_semantics(transition)
-        self.recent_actions.append(action.name)
-        self.recent_action_keys.append(action.key)
         if discovered_new_state:
             self.steps_since_new_state = 0
         else:
@@ -162,17 +161,28 @@ class GraphSearchAgent(ArcAgentRuntime):
         transition.notes.update(progress_signal.to_notes())
         semantic_progress = progress_signal.is_progress
         previous_state = self.recent_states[-2] if len(self.recent_states) >= 2 else None
-        previous_action_key = self.recent_action_keys[-1] if self.recent_action_keys else None
-        self.game_memory.action_effects.observe(
+        signature = self.game_memory.action_effects.observe(
             action=action,
             transition=transition,
             notes=transition.notes,
             progress_score=progress_signal.score,
             returned_previous=previous_state is not None and transition.to_state == previous_state,
             returned_initial=transition.to_state == getattr(self, "initial_state_key", None) and transition.from_state != transition.to_state,
-            previous_action_key=previous_action_key,
+            previous_action_key=prior_action_key,
             latent_state=dict(self.game_memory.world_model.latent_state_candidates),
         )
+        self.recent_actions.append(action.name)
+        self.recent_action_keys.append(action.key)
+        self.recent_action_families.append(
+            self.game_memory.action_family(
+                action.name,
+                action.key,
+                previous_action_key=prior_action_key,
+                region_bias=str(transition.notes.get("region_bias", "playfield")),
+            )
+        )
+        self.recent_effect_transforms.append(signature.transform_kind)
+        self.recent_progress_scores.append(progress_signal.score)
         if semantic_progress:
             self.steps_since_semantic_progress = 0
         else:
@@ -284,6 +294,11 @@ class GraphSearchAgent(ArcAgentRuntime):
             self.game_memory.world_model,
             actions,
             seen_action_keys,
+            family_for=lambda action: self.game_memory.action_family(
+                action.name,
+                action.key,
+                previous_action_key=self.recent_action_keys[-1] if self.recent_action_keys else None,
+            ),
         )
         if not proposals:
             return
@@ -365,6 +380,7 @@ class GraphSearchAgent(ArcAgentRuntime):
     def _filter_useless_actions(self, observation: Observation, actions: list[Action]) -> list[Action]:
         filtered = []
         retried = []
+        family_cooled = []
         for action in actions:
             if action.name in self.game_memory.restart_like_action_names or action.key in self.game_memory.restart_like_action_keys:
                 continue
@@ -380,12 +396,17 @@ class GraphSearchAgent(ArcAgentRuntime):
                 continue
             if self._would_repeat_recent_action_pattern(action):
                 continue
+            if self._would_repeat_recent_family_pattern(action) or self._family_is_on_cooldown(action):
+                family_cooled.append(action)
+                continue
             if self.graph.action_was_tried(observation.state_key, action):
                 retried.append(action)
                 continue
             filtered.append(action)
         if filtered:
             return filtered
+        if family_cooled:
+            return family_cooled
         non_meta = [
             action
             for action in actions
@@ -417,6 +438,51 @@ class GraphSearchAgent(ArcAgentRuntime):
             if sequence[-window:-pattern_len] == sequence[-pattern_len:]:
                 return True
         return False
+
+    def _would_repeat_recent_family_pattern(self, action: Action) -> bool:
+        if self.steps_since_semantic_progress <= 1:
+            return False
+        family = self.game_memory.action_family(
+            action.name,
+            action.key,
+            previous_action_key=self.recent_action_keys[-1] if self.recent_action_keys else None,
+        )
+        if family in {"movement", "direct_click"}:
+            return False
+        sequence = list(self.recent_action_families) + [family]
+        for pattern_len in (2, 3):
+            window = pattern_len * 2
+            if len(sequence) < window:
+                continue
+            if sequence[-window:-pattern_len] == sequence[-pattern_len:]:
+                return True
+        return False
+
+    def _family_is_on_cooldown(self, action: Action) -> bool:
+        if self.steps_since_semantic_progress < 2 or len(self.recent_action_families) < 4:
+            return False
+        family = self.game_memory.action_family(
+            action.name,
+            action.key,
+            previous_action_key=self.recent_action_keys[-1] if self.recent_action_keys else None,
+        )
+        if family in {"movement", "direct_click", "restart", "undo"}:
+            return False
+        recent_families = list(self.recent_action_families)[-5:]
+        recent_progress = list(self.recent_progress_scores)[-5:]
+        recent_transforms = list(self.recent_effect_transforms)[-5:]
+        low_progress_same_family = [
+            idx
+            for idx, recent_family in enumerate(recent_families)
+            if recent_family == family and recent_progress[idx] < 0.25
+        ]
+        if len(low_progress_same_family) < 3:
+            return False
+        transform_matches = {
+            recent_transforms[idx]
+            for idx in low_progress_same_family
+        }
+        return len(transform_matches) <= 2
 
     def _learn_meta_action(self, transition: Transition) -> None:
         if transition.won or transition.reward_delta > 0:

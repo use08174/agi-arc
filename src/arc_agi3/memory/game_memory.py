@@ -160,6 +160,43 @@ class GameMemory:
             latent_state=dict(self.world_model.latent_state_candidates),
         )
 
+    def action_family(
+        self,
+        action_name: str,
+        action_key: str,
+        *,
+        previous_action_key: str | None = None,
+        region_bias: str = "playfield",
+    ) -> str:
+        if action_key in self.restart_like_action_keys or action_name in self.restart_like_action_names:
+            return "restart"
+        if action_key in self.undo_like_action_keys or action_name in self.undo_like_action_names:
+            return "undo"
+        if "|x=" in action_key:
+            return "direct_click"
+        profile = self.semantic_profile(action_name, action_key)
+        contextual = self.contextual_effect_profile(
+            action_key,
+            previous_action_key=previous_action_key,
+            region_bias=region_bias,
+        )
+        transform = contextual.dominant_transform if contextual is not None else "unknown"
+        hints = set(profile.interaction_hints)
+        change_kinds = set(profile.common_change_kinds)
+        if transform == "movement" or bool(profile.top_motion_axes) or "player_move" in change_kinds:
+            return "movement"
+        if transform == "toggle_or_unlock" or bool(hints.intersection({"spawn_or_unlock", "board_or_room_transform"})):
+            return "toggle_or_unlock"
+        if transform == "collect_or_erase" or bool(hints.intersection({"pickup_or_consume"})) or "erase_or_collect" in change_kinds:
+            return "collect_or_erase"
+        if transform in {"repaint_or_mode_change", "large_transform", "local_transform"}:
+            return "edit_or_mode"
+        if "palette_or_mode_change" in change_kinds or "local_transform" in change_kinds or "large_area_transform" in change_kinds:
+            return "edit_or_mode"
+        if transform == "noop":
+            return "noop"
+        return f"simple:{action_name}"
+
     def _classify_change_kind(self, notes: dict[str, object]) -> str:
         changed_cells = int(notes.get("changed_cells", 0) or 0)
         nonzero_delta = int(notes.get("nonzero_delta", 0) or 0)

@@ -173,6 +173,53 @@ class ExperimentTest(unittest.TestCase):
 
         self.assertTrue(any(proposal.kind == "probe_action_pair" for proposal in proposals))
 
+    def test_macro_experiment_does_not_create_self_pair(self) -> None:
+        memory = GameMemory()
+        memory.experiments.remember_macro_effect(
+            "ACTION4",
+            "ACTION4",
+            mode_setting=True,
+            productive=True,
+        )
+
+        proposals = memory.experiments.available(
+            memory.world_model,
+            [Action(name="ACTION4")],
+            set(),
+        )
+
+        self.assertFalse(any(proposal.key == "probe_action_pair:ACTION4->ACTION4" for proposal in proposals))
+
+    def test_failed_macro_pair_is_not_reproposed(self) -> None:
+        manager = ExperimentManager(
+            active=ExperimentProposal(
+                key="probe_action_pair:ACTION2->ACTION3",
+                kind="probe_action_pair",
+                target={"first_action_key": "ACTION2", "second_action_key": "ACTION3"},
+            )
+        )
+        manager.active_session.step_count = 2  # type: ignore[union-attr]
+
+        outcome = manager.observe_transition(
+            transition=Transition(
+                from_state="s0",
+                action=Action(name="ACTION3"),
+                to_state="s1",
+                changed=False,
+            ),
+            after_notes={"interaction_hint": "unknown"},
+            world=WorldModel(),
+        )
+
+        self.assertIsNotNone(outcome)
+        self.assertEqual(outcome.status, "contradicted")
+        proposals = manager.available(
+            WorldModel(),
+            [Action(name="ACTION2"), Action(name="ACTION3")],
+            set(),
+        )
+        self.assertFalse(any(proposal.key == "probe_action_pair:ACTION2->ACTION3" for proposal in proposals))
+
     def test_probe_action_pair_session_executes_two_step_macro(self) -> None:
         memory = GameMemory()
         memory.experiments.activate(

@@ -123,6 +123,29 @@ class ExplorationPressureTest(unittest.TestCase):
 
         self.assertTrue(agent._would_repeat_recent_action_pattern(Action(name="ACTION3")))
 
+    def test_recent_family_loop_pattern_is_filtered(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        agent.steps_since_semantic_progress = 2
+        agent.recent_action_families.extend(
+            ["simple:ACTION4", "simple:ACTION5", "simple:ACTION4", "simple:ACTION5"]
+        )
+
+        self.assertTrue(agent._would_repeat_recent_family_pattern(Action(name="ACTION4")))
+
+    def test_low_progress_family_gets_cooldown(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        agent.steps_since_semantic_progress = 4
+        agent.recent_action_families.extend(
+            ["simple:ACTION3", "simple:ACTION3", "simple:ACTION3", "simple:ACTION3"]
+        )
+        agent.recent_effect_transforms.extend(
+            ["local_transform", "local_transform", "local_transform", "local_transform"]
+        )
+        agent.recent_progress_scores.extend([0.0, 0.1, 0.0, 0.05])
+
+        self.assertTrue(agent._family_is_on_cooldown(Action(name="ACTION3")))
+        self.assertFalse(agent._family_is_on_cooldown(Action(name="ACTION6", payload={"x": 1, "y": 1})))
+
 
 if __name__ == "__main__":
     unittest.main()
