@@ -216,6 +216,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             family=current_family,
             discovered_new_state=discovered_new_state,
             notes=transition.notes,
+            progress_score=progress_signal.score,
         )
         self.recent_states.append(next_observation.state_key)
         return next_observation
@@ -566,6 +567,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         family: str,
         discovered_new_state: bool,
         notes: dict[str, object],
+        progress_score: float,
     ) -> None:
         if family != "movement":
             self._clear_movement_commitment()
@@ -574,14 +576,16 @@ class GraphSearchAgent(ArcAgentRuntime):
         relation_marker_improvement = float(notes.get("relation_nearest_marker_improvement", 0.0) or 0.0)
         relation_alignment_delta = float(notes.get("relation_best_alignment_delta", 0.0) or 0.0)
         semantic_player_moved = bool(notes.get("semantic_player_moved", False))
-        if semantic_player_moved and (
+        saw_semantic_signal = (
             discovered_new_state
             or relation_focus_delta > 0
             or relation_marker_improvement > 0
             or relation_alignment_delta > 0
-        ):
+            or progress_score >= 0.18
+        )
+        if semantic_player_moved and (saw_semantic_signal or not action.payload):
             self.movement_commitment_action_key = action.key
-            self.movement_commitment_remaining = 2
+            self.movement_commitment_remaining = 3 if saw_semantic_signal else 2
             return
         if self.movement_commitment_action_key == action.key:
             self._clear_movement_commitment()

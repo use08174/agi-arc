@@ -201,12 +201,13 @@ class ExplorationPressureTest(unittest.TestCase):
                 "relation_nearest_marker_improvement": 0.0,
                 "relation_best_alignment_delta": 0.0,
             },
+            progress_score=0.3,
         )
 
         chosen = agent._continue_movement_commitment([action, Action(name="ACTION2")])
 
         self.assertEqual(chosen.key, "ACTION1")
-        self.assertEqual(agent.movement_commitment_remaining, 1)
+        self.assertEqual(agent.movement_commitment_remaining, 2)
 
     def test_non_movement_clears_movement_commitment(self) -> None:
         agent = GraphSearchAgent(config=AgentConfig())
@@ -218,10 +219,31 @@ class ExplorationPressureTest(unittest.TestCase):
             family="edit_or_mode",
             discovered_new_state=False,
             notes={"semantic_player_moved": False},
+            progress_score=0.0,
         )
 
         self.assertIsNone(agent.movement_commitment_action_key)
         self.assertEqual(agent.movement_commitment_remaining, 0)
+
+    def test_plain_movement_still_gets_short_commitment(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        action = Action(name="ACTION2")
+
+        agent._update_movement_commitment(
+            action=action,
+            family="movement",
+            discovered_new_state=False,
+            notes={
+                "semantic_player_moved": True,
+                "relation_focus_delta": 0,
+                "relation_nearest_marker_improvement": 0.0,
+                "relation_best_alignment_delta": 0.0,
+            },
+            progress_score=0.0,
+        )
+
+        self.assertEqual(agent.movement_commitment_action_key, "ACTION2")
+        self.assertEqual(agent.movement_commitment_remaining, 2)
 
 
 if __name__ == "__main__":
