@@ -188,6 +188,41 @@ class ExplorationPressureTest(unittest.TestCase):
 
         self.assertEqual([action.key for action in filtered], ["ACTION6|x=5,y=5"])
 
+    def test_movement_commitment_continues_recent_informative_move(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        action = Action(name="ACTION1")
+        agent._update_movement_commitment(
+            action=action,
+            family="movement",
+            discovered_new_state=True,
+            notes={
+                "semantic_player_moved": True,
+                "relation_focus_delta": 1,
+                "relation_nearest_marker_improvement": 0.0,
+                "relation_best_alignment_delta": 0.0,
+            },
+        )
+
+        chosen = agent._continue_movement_commitment([action, Action(name="ACTION2")])
+
+        self.assertEqual(chosen.key, "ACTION1")
+        self.assertEqual(agent.movement_commitment_remaining, 1)
+
+    def test_non_movement_clears_movement_commitment(self) -> None:
+        agent = GraphSearchAgent(config=AgentConfig())
+        agent.movement_commitment_action_key = "ACTION1"
+        agent.movement_commitment_remaining = 2
+
+        agent._update_movement_commitment(
+            action=Action(name="ACTION3"),
+            family="edit_or_mode",
+            discovered_new_state=False,
+            notes={"semantic_player_moved": False},
+        )
+
+        self.assertIsNone(agent.movement_commitment_action_key)
+        self.assertEqual(agent.movement_commitment_remaining, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

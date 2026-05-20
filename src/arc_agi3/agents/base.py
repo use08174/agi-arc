@@ -50,6 +50,8 @@ class ArcAgentRuntime:
         self.steps_since_semantic_progress = 0
         self.click_no_progress_counts: dict[str, int] = {}
         self.previous_action_context: dict[str, object] | None = None
+        self.movement_commitment_action_key: str | None = None
+        self.movement_commitment_remaining = 0
 
     def reset_level(self) -> None:
         self.graph = StateGraph()
@@ -65,3 +67,5 @@ class ArcAgentRuntime:
         self.steps_since_semantic_progress = 0
         self.click_no_progress_counts = {}
         self.previous_action_context = None
+        self.movement_commitment_action_key = None
+        self.movement_commitment_remaining = 0

@@ -211,6 +211,12 @@ class GraphSearchAgent(ArcAgentRuntime):
             else:
                 self.click_no_progress_counts[action.key] = self.click_no_progress_counts.get(action.key, 0) + 1
         self._learn_macro_semantics(action, transition, progress_signal.score)
+        self._update_movement_commitment(
+            action=action,
+            family=current_family,
+            discovered_new_state=discovered_new_state,
+            notes=transition.notes,
+        )
         self.recent_states.append(next_observation.state_key)
         return next_observation
 
@@ -221,6 +227,15 @@ class GraphSearchAgent(ArcAgentRuntime):
         actions = self._prefer_unseen_actions(observation, actions, force_exploration)
         actions = self._reprioritize_click_actions(actions)
         self._activate_experiment_if_idle(observation, actions, force_exploration)
+        committed_movement = self._continue_movement_commitment(actions)
+        if committed_movement is not None:
+            return self._trace_decision(
+                step_idx,
+                observation,
+                committed_movement,
+                "explorer",
+                "continuing short movement sweep to expose more object relations",
+            )
         experiment_step = self.experiment_runner.build_step_from_session(
             session=self.game_memory.experiments.active_session,
             actions=actions,
@@ -333,6 +348,25 @@ class GraphSearchAgent(ArcAgentRuntime):
         if selected is None:
             return
         self.game_memory.experiments.activate(selected)
+
+    def _continue_movement_commitment(self, actions: list[Action]) -> Action | None:
+        if self.game_memory.experiments.active is not None:
+            return None
+        if self.movement_commitment_remaining <= 0 or not self.movement_commitment_action_key:
+            return None
+        for action in actions:
+            if action.key != self.movement_commitment_action_key:
+                continue
+            if self.game_memory.world_model.is_unsafe_action(action):
+                self._clear_movement_commitment()
+                return None
+            if self.game_memory.world_model.is_blocked_action(action):
+                self._clear_movement_commitment()
+                return None
+            self.movement_commitment_remaining -= 1
+            return action
+        self._clear_movement_commitment()
+        return None
 
     def _trace_decision(self, step_idx: int, observation: Observation, action: Action, source: str, reason: str) -> Action:
         self.decision_traces.append(
@@ -524,6 +558,37 @@ class GraphSearchAgent(ArcAgentRuntime):
         if family_counts.get(family, 0) >= max(4, self.config.budget.recent_action_window - 1):
             return True
         return len(transform_matches) <= 2
+
+    def _update_movement_commitment(
+        self,
+        *,
+        action: Action,
+        family: str,
+        discovered_new_state: bool,
+        notes: dict[str, object],
+    ) -> None:
+        if family != "movement":
+            self._clear_movement_commitment()
+            return
+        relation_focus_delta = int(notes.get("relation_focus_delta", 0) or 0)
+        relation_marker_improvement = float(notes.get("relation_nearest_marker_improvement", 0.0) or 0.0)
+        relation_alignment_delta = float(notes.get("relation_best_alignment_delta", 0.0) or 0.0)
+        semantic_player_moved = bool(notes.get("semantic_player_moved", False))
+        if semantic_player_moved and (
+            discovered_new_state
+            or relation_focus_delta > 0
+            or relation_marker_improvement > 0
+            or relation_alignment_delta > 0
+        ):
+            self.movement_commitment_action_key = action.key
+            self.movement_commitment_remaining = 2
+            return
+        if self.movement_commitment_action_key == action.key:
+            self._clear_movement_commitment()
+
+    def _clear_movement_commitment(self) -> None:
+        self.movement_commitment_action_key = None
+        self.movement_commitment_remaining = 0
 
     def _action_is_on_cooldown(self, action: Action) -> bool:
         if self.steps_since_semantic_progress < 2 or len(self.recent_action_keys) < 4:
