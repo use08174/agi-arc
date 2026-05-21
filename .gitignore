@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 recordings/
 .arc_agi3_external/
+vendor/ARC-MDL/results/
+vendor/CompressARC/results_for_the_blog_post/
+vendor/CompressARC/dataset/
+vendor/CompressARC/__pycache__/
