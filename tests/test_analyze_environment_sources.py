@@ -36,5 +36,8 @@ def step(action: GameAction, action_input: ActionInput):
     assert card.sprites[0].colors == [9]
     assert card.uses_action6 is True
     assert card.uses_action_input is True
+    assert card.control_family == "mixed_move_coordinate"
+    assert card.grid_bucket == "small"
+    assert card.recommended_strategy == "learn_simple_actions_then_object_clicks"
     assert "navigation" in card.source_hints
-    assert card.task_family_prior in {"painting", "selection", "navigation"}
+    assert card.task_family_prior == "hybrid"

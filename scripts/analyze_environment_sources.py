@@ -67,6 +67,8 @@ HINT_KEYWORDS = {
         "bounce",
     ),
 }
+GOAL_RE = re.compile(r"\b(?:WIN|GAME_OVER|NOT_FINISHED|won|win|lose|game_over|next_level|complete|success|fail)\b", re.IGNORECASE)
+OBFUSCATED_NAME_RE = re.compile(r"^[a-z]{9,}$")
 
 
 @dataclass(slots=True)
@@ -94,9 +96,15 @@ class GameSourceCard:
     uses_action6: bool = False
     uses_action7: bool = False
     uses_action_input: bool = False
+    control_family: str = "unknown"
+    grid_bucket: str = "unknown"
+    recommended_strategy: str = "unknown"
     class_names: list[str] = field(default_factory=list)
     function_names: list[str] = field(default_factory=list)
     source_hints: list[str] = field(default_factory=list)
+    broad_source_hints: list[str] = field(default_factory=list)
+    action_context_hints: list[str] = field(default_factory=list)
+    goal_context_hints: list[str] = field(default_factory=list)
     task_family_prior: str = "unknown"
     confidence: float = 0.0
 
@@ -148,6 +156,8 @@ class EnvironmentSourceAnalyzer(ast.NodeVisitor):
         self.class_names: list[str] = []
         self.function_names: list[str] = []
         self.uses_action_input = False
+        self.action_contexts: list[str] = []
+        self.goal_contexts: list[str] = []
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.class_names.append(node.name)
@@ -157,10 +167,12 @@ class EnvironmentSourceAnalyzer(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.function_names.append(node.name)
+        self._record_focused_context(node)
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self.function_names.append(node.name)
+        self._record_focused_context(node)
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
@@ -227,13 +239,23 @@ class EnvironmentSourceAnalyzer(ast.NodeVisitor):
 
     def build_card(self) -> GameSourceCard:
         action_refs = sorted(set(ACTION_RE.findall(self.source)))
-        hints = self._source_hints()
+        broad_hints = self._source_hints(self.source_lower)
+        action_context_text = "\n".join(self.action_contexts).lower()
+        goal_context_text = "\n".join(self.goal_contexts).lower()
+        action_hints = self._source_hints(action_context_text)
+        goal_hints = self._source_hints(goal_context_text)
+        hints = sorted(set(action_hints + goal_hints))
+        control_family = infer_control_family(action_refs)
+        grid_bucket = infer_grid_bucket(self.grid_sizes)
+        recommended_strategy = infer_recommended_strategy(control_family, grid_bucket)
         prior, confidence = infer_task_family(
             hints=hints,
             action_refs=action_refs,
             uses_action_input=self.uses_action_input,
             sprite_count=len(self.sprites),
             grid_sizes=self.grid_sizes,
+            control_family=control_family,
+            grid_bucket=grid_bucket,
         )
         return GameSourceCard(
             game_id=infer_game_id(self.path),
@@ -248,19 +270,35 @@ class EnvironmentSourceAnalyzer(ast.NodeVisitor):
             uses_action6="ACTION6" in action_refs,
             uses_action7="ACTION7" in action_refs,
             uses_action_input=self.uses_action_input,
+            control_family=control_family,
+            grid_bucket=grid_bucket,
+            recommended_strategy=recommended_strategy,
             class_names=sorted(set(self.class_names)),
-            function_names=sorted(set(self.function_names)),
+            function_names=sorted(set(self._non_obfuscated_names(self.function_names))),
             source_hints=hints,
+            broad_source_hints=broad_hints,
+            action_context_hints=action_hints,
+            goal_context_hints=goal_hints,
             task_family_prior=prior,
             confidence=confidence,
         )
 
-    def _source_hints(self) -> list[str]:
+    def _source_hints(self, source_lower: str) -> list[str]:
         hints: list[str] = []
         for family, keywords in HINT_KEYWORDS.items():
-            if any(keyword in self.source_lower for keyword in keywords):
+            if any(keyword in source_lower for keyword in keywords):
                 hints.append(family)
         return hints
+
+    def _record_focused_context(self, node: ast.AST) -> None:
+        segment = ast.get_source_segment(self.source, node) or ""
+        if ACTION_RE.search(segment):
+            self.action_contexts.append(segment)
+        if GOAL_RE.search(segment):
+            self.goal_contexts.append(segment)
+
+    def _non_obfuscated_names(self, names: list[str]) -> list[str]:
+        return [name for name in names if not OBFUSCATED_NAME_RE.fullmatch(name)]
 
 
 def infer_game_id(path: Path) -> str:
@@ -283,6 +321,57 @@ def unique_lists(items: list[list[int]]) -> list[list[int]]:
     return out
 
 
+def infer_control_family(action_refs: list[str]) -> str:
+    actions = set(action_refs)
+    simple_moves = {"ACTION1", "ACTION2", "ACTION3", "ACTION4"}
+    has_move_set = bool(simple_moves & actions)
+    has_coord = "ACTION6" in actions
+    extra_simple = bool({"ACTION5", "ACTION7"} & actions)
+    if has_coord and not has_move_set and not extra_simple:
+        return "coordinate_only"
+    if has_coord and has_move_set:
+        return "mixed_move_coordinate"
+    if has_coord and extra_simple:
+        return "coordinate_mode"
+    if has_move_set and not has_coord and not extra_simple:
+        return "movement_only"
+    if has_move_set and extra_simple and not has_coord:
+        return "movement_mode"
+    if extra_simple and not has_coord and not has_move_set:
+        return "mode_only"
+    return "unknown"
+
+
+def infer_grid_bucket(grid_sizes: list[list[int]]) -> str:
+    if not grid_sizes:
+        return "unknown"
+    max_dim = max(max(size) for size in grid_sizes if size)
+    varied = len(unique_lists(grid_sizes)) > 1
+    if max_dim <= 12:
+        bucket = "small"
+    elif max_dim <= 32:
+        bucket = "medium"
+    else:
+        bucket = "large"
+    return f"{bucket}_varied" if varied else bucket
+
+
+def infer_recommended_strategy(control_family: str, grid_bucket: str) -> str:
+    large = grid_bucket.startswith("large")
+    small = grid_bucket.startswith("small")
+    if control_family == "coordinate_only":
+        return "object_coordinate_probe" if large else "dense_coordinate_probe"
+    if control_family in {"mixed_move_coordinate", "coordinate_mode"}:
+        return "learn_simple_actions_then_object_clicks"
+    if control_family == "movement_only":
+        return "state_graph_bfs" if small else "movement_axis_model"
+    if control_family == "movement_mode":
+        return "learn_mode_then_movement_model"
+    if control_family == "mode_only":
+        return "mode_cycle_probe"
+    return "generic_refinement_probe"
+
+
 def infer_task_family(
     *,
     hints: list[str],
@@ -290,24 +379,48 @@ def infer_task_family(
     uses_action_input: bool,
     sprite_count: int,
     grid_sizes: list[list[int]],
+    control_family: str,
+    grid_bucket: str,
 ) -> tuple[str, float]:
-    scores = {family: 0.0 for family in HINT_KEYWORDS}
+    scores = {
+        "coordinate_interaction": 0.0,
+        "navigation": 0.0,
+        "hybrid": 0.0,
+        "mode_control": 0.0,
+        "transformation": 0.0,
+        "alignment": 0.0,
+        "unknown": 0.0,
+    }
+    if control_family == "coordinate_only":
+        scores["coordinate_interaction"] += 2.0
+    elif control_family in {"mixed_move_coordinate", "coordinate_mode"}:
+        scores["hybrid"] += 2.0
+    elif control_family in {"movement_only", "movement_mode"}:
+        scores["navigation"] += 1.8
+    elif control_family == "mode_only":
+        scores["mode_control"] += 1.5
     for hint in hints:
-        scores[hint] = scores.get(hint, 0.0) + 1.0
+        if hint == "painting" or hint == "selection":
+            scores["coordinate_interaction"] += 0.5
+        elif hint == "physics":
+            scores["navigation"] += 0.3
+        elif hint in scores:
+            scores[hint] += 0.5
     if "ACTION6" in action_refs or uses_action_input:
-        scores["painting"] += 0.8
-        scores["selection"] += 0.6
+        scores["coordinate_interaction"] += 0.4
     if {"ACTION1", "ACTION2", "ACTION3", "ACTION4"} & set(action_refs):
-        scores["navigation"] += 0.6
+        scores["navigation"] += 0.3
     if sprite_count <= 2 and grid_sizes:
         max_dim = max(max(size) for size in grid_sizes if size)
         if max_dim <= 12:
             scores["navigation"] += 0.4
+    if grid_bucket.startswith("large") and control_family == "coordinate_only":
+        scores["coordinate_interaction"] += 0.4
     best_family, best_score = max(scores.items(), key=lambda item: item[1])
     if best_score <= 0:
         return "unknown", 0.0
     total = sum(scores.values()) or 1.0
-    return best_family, round(min(1.0, best_score / total + 0.25), 3)
+    return best_family, round(min(1.0, best_score / total + 0.35), 3)
 
 
 def analyze_file(path: Path) -> GameSourceCard:
@@ -365,12 +478,28 @@ def print_text(cards: list[GameSourceCard]) -> None:
                 grid,
                 str(len(card.sprites)),
                 actions,
+                card.control_family,
+                card.grid_bucket,
                 card.task_family_prior,
                 f"{card.confidence:.2f}",
+                card.recommended_strategy,
                 hints,
             ]
         )
-    headers = ["game", "parse", "levels", "grid", "sprites", "actions", "prior", "conf", "hints"]
+    headers = [
+        "game",
+        "parse",
+        "levels",
+        "grid",
+        "sprites",
+        "actions",
+        "control",
+        "bucket",
+        "prior",
+        "conf",
+        "strategy",
+        "focused_hints",
+    ]
     widths = [max(len(row[i]) for row in rows + [headers]) for i in range(len(headers))]
     print("  ".join(header.ljust(widths[i]) for i, header in enumerate(headers)))
     print("  ".join("-" * width for width in widths))
@@ -397,8 +526,15 @@ def write_csv(cards: list[GameSourceCard], output: Path | None) -> None:
         "sprite_count",
         "action_refs",
         "uses_action6",
+        "uses_action7",
         "uses_action_input",
+        "control_family",
+        "grid_bucket",
+        "recommended_strategy",
         "source_hints",
+        "broad_source_hints",
+        "action_context_hints",
+        "goal_context_hints",
         "task_family_prior",
         "confidence",
         "error",
@@ -419,8 +555,15 @@ def write_csv(cards: list[GameSourceCard], output: Path | None) -> None:
                     "sprite_count": len(card.sprites),
                     "action_refs": ";".join(card.action_refs),
                     "uses_action6": card.uses_action6,
+                    "uses_action7": card.uses_action7,
                     "uses_action_input": card.uses_action_input,
+                    "control_family": card.control_family,
+                    "grid_bucket": card.grid_bucket,
+                    "recommended_strategy": card.recommended_strategy,
                     "source_hints": ";".join(card.source_hints),
+                    "broad_source_hints": ";".join(card.broad_source_hints),
+                    "action_context_hints": ";".join(card.action_context_hints),
+                    "goal_context_hints": ";".join(card.goal_context_hints),
                     "task_family_prior": card.task_family_prior,
                     "confidence": card.confidence,
                     "error": card.error or "",
