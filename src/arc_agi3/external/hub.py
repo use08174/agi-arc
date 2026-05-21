@@ -14,7 +14,8 @@ class ExternalReasonerHub:
     """Connect vendored external ARC repos to the runtime."""
 
     def __init__(self, repo_root: Path | None = None) -> None:
-        self.repo_root = repo_root or Path(__file__).resolve().parents[3]
+        env_repo_root = os.getenv("ARC_AGI3_VENDOR_REPO") or os.getenv("AGI_ARC_REPO")
+        self.repo_root = Path(env_repo_root) if env_repo_root else (repo_root or Path(__file__).resolve().parents[3])
         self.artifact_dir = self.repo_root / ".arc_agi3_external"
         self.exporter: EpisodeTaskExporter | None = None
         self.compressarc = CompressARCAdapter(self.repo_root)
