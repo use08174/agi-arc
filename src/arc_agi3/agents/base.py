@@ -8,7 +8,7 @@ from arc_agi3.exploration.frontier import FrontierExplorer
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.memory.state_graph import StateGraph
 from arc_agi3.perception.hasher import StateHasher
-from arc_agi3.policy.backend_controller import BackendActionController
+from arc_agi3.policy.refinement_controller import RefinementController
 from arc_agi3.planning.experiment_policy import ExperimentPolicy
 from arc_agi3.planning.experiment_runner import ExperimentRunner
 from arc_agi3.planning.simple_planner import SimplePlanner
@@ -25,7 +25,7 @@ class ArcAgentRuntime:
         self.planner = SimplePlanner()
         self.experiment_policy = ExperimentPolicy()
         self.experiment_runner = ExperimentRunner()
-        self.backend_controller = BackendActionController(self.config)
+        self.refinement_controller = RefinementController(self.config)
         self.game_memory = GameMemory()
         self.graph = StateGraph()
         self.previous_observation: Observation | None = None

@@ -99,17 +99,8 @@ def main() -> None:
     ensure_src_on_path()
     os.environ.setdefault("AGI_ARC_REPO", str(repo_root()))
     os.environ.setdefault("ARC_AGI3_USE_COMPRESSARC", "1")
-    os.environ.setdefault("ARC_AGI3_USE_ARCMDL", "1")
-    arcmdl_bin_candidates = [
-        repo_root() / "vendor" / "ARC-MDL" / "bin" / "test",
-        repo_root() / "vendor" / "ARC-MDL" / "src" / "test",
-    ]
-    detected_arcmdl_bin = next((path for path in arcmdl_bin_candidates if path.exists()), None)
-    if detected_arcmdl_bin is not None:
-        os.environ.setdefault("ARC_AGI3_ARCMDL_BIN", str(detected_arcmdl_bin))
-        os.environ.setdefault("ARC_AGI3_RUN_ARCMDL_CLI", "1")
-    else:
-        os.environ.setdefault("ARC_AGI3_RUN_ARCMDL_CLI", "0")
+    os.environ.setdefault("ARC_AGI3_USE_ARCMDL", "0")
+    os.environ.setdefault("ARC_AGI3_RUN_ARCMDL_CLI", "0")
     maybe_install_arc_agi(args)
 
     from arc_agi3.runner.main import main as runner_main

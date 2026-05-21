@@ -22,6 +22,7 @@ class GameMemory:
     solved_level_paths: list[list[str]] = field(default_factory=list)
     changed_action_keys: set[str] = field(default_factory=set)
     dangerous_action_keys: set[str] = field(default_factory=set)
+    dangerous_state_action_keys: set[tuple[str, str]] = field(default_factory=set)
     restart_like_action_keys: set[str] = field(default_factory=set)
     restart_like_action_names: set[str] = field(default_factory=set)
     undo_like_action_keys: set[str] = field(default_factory=set)
@@ -65,9 +66,15 @@ class GameMemory:
             self.action_noop_counts[action_key] = self.action_noop_counts.get(action_key, 0) + 1
         self.action_use_counts[action_key] = self.action_use_counts.get(action_key, 0) + 1
 
-    def remember_danger(self, action_key: str) -> None:
-        self.dangerous_action_keys.add(action_key)
+    def remember_danger(self, action_key: str, state_key: str | None = None) -> None:
+        if state_key is not None:
+            self.dangerous_state_action_keys.add((state_key, action_key))
         self.action_terminal_loss_counts[action_key] = self.action_terminal_loss_counts.get(action_key, 0) + 1
+        if self.action_terminal_loss_counts[action_key] >= 2:
+            self.dangerous_action_keys.add(action_key)
+
+    def is_dangerous(self, state_key: str, action_key: str) -> bool:
+        return action_key in self.dangerous_action_keys or (state_key, action_key) in self.dangerous_state_action_keys
 
     def remember_reward(self, action_key: str, reward_delta: float) -> None:
         self.action_reward_counts[action_key] = self.action_reward_counts.get(action_key, 0.0) + reward_delta

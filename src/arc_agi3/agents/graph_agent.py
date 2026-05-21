@@ -243,17 +243,15 @@ class GraphSearchAgent(ArcAgentRuntime):
                 step_idx,
                 observation,
                 committed_movement,
-                "backend_commitment",
-                "continuing backend-guided movement sweep",
+                "refinement_commitment",
+                "continuing refinement-guided movement sweep",
             )
-        decision = self.backend_controller.choose_action(
+        decision = self.refinement_controller.choose_action(
             observation=observation,
             actions=actions,
             graph=self.graph,
             game_memory=self.game_memory,
             recent_action_keys=list(self.recent_action_keys),
-            recent_action_families=list(self.recent_action_families),
-            recent_states=list(self.recent_states),
         )
         if decision is not None:
             return self._trace_decision(step_idx, observation, decision.action, decision.source, decision.reason)
@@ -265,14 +263,14 @@ class GraphSearchAgent(ArcAgentRuntime):
                     step_idx,
                     observation,
                     action,
-                    "backend_counterfactual",
-                    "forcing unfamiliar action to break backend plateau",
+                    "refinement_counterfactual",
+                    "forcing unfamiliar action to break refinement plateau",
                 )
         if not actions:
             fallback = self._fallback_action(observation, actions or original_actions)
             return self._trace_decision(step_idx, observation, fallback, "fallback", "no ranked frontier action")
         action = actions[0]
-        return self._trace_decision(step_idx, observation, action, "backend_fallback", "defaulting to remaining backend-safe action")
+        return self._trace_decision(step_idx, observation, action, "refinement_fallback", "defaulting to remaining refinement-safe action")
 
     def _prefer_unseen_actions(self, observation: Observation, actions: list[Action], force_exploration: bool) -> list[Action]:
         if not actions:
@@ -420,7 +418,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             self.game_memory.remember_collectible_progress(transition.action.key)
             self.game_memory.remember_effect(transition.action.name, transition.action.key, "collectible_progress")
         if transition.terminal and not transition.won:
-            self.game_memory.remember_danger(transition.action.key)
+            self.game_memory.remember_danger(transition.action.key, transition.from_state)
 
     def _filter_useless_actions(self, observation: Observation, actions: list[Action]) -> list[Action]:
         filtered = []
@@ -432,7 +430,7 @@ class GraphSearchAgent(ArcAgentRuntime):
                 continue
             if action.name in self.game_memory.undo_like_action_names or action.key in self.game_memory.undo_like_action_keys:
                 continue
-            if action.key in self.game_memory.dangerous_action_keys:
+            if self.game_memory.is_dangerous(observation.state_key, action.key):
                 continue
             if action.payload and self.click_no_progress_counts.get(action.key, 0) >= 2:
                 continue
@@ -482,7 +480,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         if self.steps_since_semantic_progress <= 0:
             return False
         sequence = list(self.recent_action_keys) + [action.key]
-        for pattern_len in (2, 3, 4):
+        for pattern_len in (1, 2, 3, 4):
             window = pattern_len * 2
             if len(sequence) < window:
                 continue
@@ -672,7 +670,7 @@ class GraphSearchAgent(ArcAgentRuntime):
                 continue
             if action.name in self.game_memory.undo_like_action_names or action.key in self.game_memory.undo_like_action_keys:
                 continue
-            if action.key in self.game_memory.dangerous_action_keys:
+            if self.game_memory.is_dangerous(observation.state_key, action.key):
                 continue
             if action.payload and self.click_no_progress_counts.get(action.key, 0) >= 2:
                 continue

@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from arc_agi3.core.types import Action, Frame
-from arc_agi3.external.arcmdl_adapter import ArcMDLAdapter
 from arc_agi3.external.compressarc_adapter import CompressARCAdapter
 from arc_agi3.external.episode_task_export import EpisodeTaskExporter
 
@@ -19,9 +18,7 @@ class ExternalReasonerHub:
         self.artifact_dir = self.repo_root / ".arc_agi3_external"
         self.exporter: EpisodeTaskExporter | None = None
         self.compressarc = CompressARCAdapter(self.repo_root)
-        self.arcmdl = ArcMDLAdapter(self.repo_root, self.artifact_dir)
         self.use_compressarc = os.getenv("ARC_AGI3_USE_COMPRESSARC", "1") != "0"
-        self.use_arcmdl = os.getenv("ARC_AGI3_USE_ARCMDL", "1") != "0"
 
     def reset(self, task_id: str, frame: Frame) -> dict[str, Any]:
         self.exporter = EpisodeTaskExporter(task_id=task_id)
@@ -60,21 +57,6 @@ class ExternalReasonerHub:
                 notes["compressarc_in_out_same_size"] = bool(info.get("in_out_same_size"))
                 notes["compressarc_all_in_same_size"] = bool(info.get("all_in_same_size"))
                 notes["compressarc_all_out_same_size"] = bool(info.get("all_out_same_size"))
-
-        if self.use_arcmdl:
-            info = self.arcmdl.analyze(self.exporter.task_id, problem)
-            notes["external_arcmdl"] = info
-            if info.get("available"):
-                notes["arcmdl_train_examples"] = int(info.get("train_examples", 0) or 0)
-                notes["external_reasoner_summary"].append(
-                    "arcmdl:"
-                    f"train={info.get('train_examples')} "
-                    f"compiled={int(bool(info.get('compiled_binary')))} "
-                    f"mode={info.get('mode', 'unknown')}"
-                )
-                notes["arcmdl_compiled_available"] = bool(info.get("compiled_binary"))
-                notes["arcmdl_mode"] = str(info.get("mode", "unknown"))
-                notes["arcmdl_model_present"] = bool(info.get("md_model_present", False))
 
         notes.update(self._runtime_hints(notes))
         return notes
