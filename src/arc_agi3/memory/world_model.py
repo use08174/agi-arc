@@ -166,6 +166,8 @@ class WorldModel:
     relation_summary: dict[str, Any] = field(default_factory=dict)
     relation_focus: list[str] = field(default_factory=list)
     relation_snapshots: list[dict[str, Any]] = field(default_factory=list)
+    external_reasoner_summary: list[str] = field(default_factory=list)
+    external_reasoner_metadata: dict[str, Any] = field(default_factory=dict)
     latent_state_candidates: dict[str, str] = field(default_factory=dict)
     latent_state_confidence: dict[str, float] = field(default_factory=dict)
     last_latent_transition: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
@@ -189,6 +191,9 @@ class WorldModel:
         self.relation_focus = [str(item) for item in (notes.get("semantic_relation_focus", []) or []) if item]
         relation_snapshots = notes.get("semantic_relations")
         self.relation_snapshots = [item for item in (relation_snapshots or []) if isinstance(item, dict)][:24]
+        self.external_reasoner_summary = [str(item) for item in (notes.get("external_reasoner_summary", []) or []) if item]
+        metadata = notes.get("external_reasoner_metadata")
+        self.external_reasoner_metadata = metadata if isinstance(metadata, dict) else {}
         self.anchor_patch_states = {
             str(item.get("anchor")): str(item.get("signature"))
             for item in notes.get("anchor_patch_summary", []) or []
@@ -392,6 +397,8 @@ class WorldModel:
                 f"{self.reference_workspace_match.get('workspace_anchor')} "
                 f"score={float(self.reference_workspace_match.get('alignment_score', 0.0) or 0.0):.2f}"
             )
+        if self.external_reasoner_summary:
+            lines.append("external=" + "; ".join(self.external_reasoner_summary[:2]))
         if self.relation_summary:
             lines.append(
                 "relation_summary="

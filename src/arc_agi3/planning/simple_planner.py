@@ -33,6 +33,12 @@ class SimplePlanner:
         world = game_memory.world_model
         recent_action_keys = recent_action_keys or []
         recent_action_families = recent_action_families or []
+        external_same_size = bool(observation.notes.get("compressarc_in_out_same_size")) and bool(
+            observation.notes.get("compressarc_all_in_same_size")
+        )
+        external_colors = int(observation.notes.get("compressarc_n_colors", 0) or 0)
+        external_frames = int((observation.notes.get("external_reasoner_metadata") or {}).get("observed_frames", 0) or 0)
+        early_external_phase = external_frames <= 5
         path = self.path_planner.plan_to_nearest_item_or_goal(world, actions)
         if path:
             return [PlanStep(action=path[0], reason="following BFS safe path to semantic target")]
@@ -124,6 +130,9 @@ class SimplePlanner:
                     successor is not None and successor == observation.state_key,
                     successor in recent_states if successor is not None else False,
                     graph.is_back_edge(observation.state_key, successor) if successor is not None else False,
+                    external_same_size and early_external_phase and family != "movement",
+                    external_same_size and early_external_phase and action.payload,
+                    (not external_same_size) and external_colors >= 5 and family == "movement" and not action.payload,
                     recent_family_pressure >= 4 and family_alignment_score <= 0.0 and context_progress < 0.25,
                     recent_key_pressure >= 3 and alignment_score <= 0.0 and context_progress < 0.25,
                     alignment_score <= 0.0 and family_alignment_score <= 0.0 and context_progress < 0.20,

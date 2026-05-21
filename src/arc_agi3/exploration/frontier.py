@@ -32,6 +32,12 @@ class FrontierExplorer:
             if axis
         }
         needs_axis_discovery = len(known_axes) < 2
+        external_same_size = bool(observation.notes.get("compressarc_in_out_same_size")) and bool(
+            observation.notes.get("compressarc_all_in_same_size")
+        )
+        external_colors = int(observation.notes.get("compressarc_n_colors", 0) or 0)
+        external_frames = int((observation.notes.get("external_reasoner_metadata") or {}).get("observed_frames", 0) or 0)
+        early_external_phase = external_frames <= 4
         ranked = []
         previous_action_key = None
         for index, action in enumerate(actions):
@@ -75,6 +81,11 @@ class FrontierExplorer:
             if action.name == "ACTION6" and action.payload:
                 xy = (int(action.payload.get("x", -999)), int(action.payload.get("y", -999)))
                 click_target_preferred = xy in world.preferred_click_targets(limit=12)
+            family = game_memory.action_family(
+                action.name,
+                action.key,
+                previous_action_key=previous_action_key,
+            )
             movement_discovery_candidate = (
                 needs_axis_discovery
                 and not action.payload
@@ -86,6 +97,9 @@ class FrontierExplorer:
                     terminal_loss,
                     learned_label in {"restart_like", "undo_like", "hud_only"} and learned_confidence >= 0.6,
                     blocked,
+                    external_same_size and early_external_phase and family != "movement",
+                    external_same_size and early_external_phase and action.payload,
+                    (not external_same_size) and external_colors >= 5 and family == "movement" and action.payload == {},
                     not movement_discovery_candidate,
                     not unseen_from_state if force_exploration else False,
                     globally_noop and not unseen_from_state,
@@ -95,6 +109,7 @@ class FrontierExplorer:
                     not moves_toward_item,
                     not known_reward,
                     not known_collectible,
+                    external_same_size and family != "movement" and context_progress < 0.20 and not known_reward,
                     -uncertainty if force_exploration else 0.0,
                     -context_progress,
                     context_transform == "noop",

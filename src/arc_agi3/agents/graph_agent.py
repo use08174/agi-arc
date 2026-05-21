@@ -6,6 +6,7 @@ from arc_agi3.agents.base import ArcAgentRuntime
 from arc_agi3.agents.env_understanding_agent import EnvUnderstandingAgent
 from arc_agi3.core.types import Action, DecisionTrace, Frame, GameStatus, Observation, Transition
 from arc_agi3.envs.base import ArcEnvironment
+from arc_agi3.external import ExternalReasonerHub
 from arc_agi3.planning.safety_shield import SafetyShield
 
 
@@ -19,7 +20,14 @@ class GraphSearchAgent(ArcAgentRuntime):
         self.reset_level()
         self.safety_shield = SafetyShield()
         self.understanding_agent = EnvUnderstandingAgent()
+        self.external_reasoners = ExternalReasonerHub()
         observation = self.hasher.observe(frame)
+        observation.notes.update(
+            self.external_reasoners.reset(
+                task_id=str(frame.info.get("guid", frame.info.get("game_id", "external"))),
+                frame=frame,
+            )
+        )
         self.game_memory.world_model.update_from_observation(observation.notes)
         self.graph.touch(observation.state_key, terminal=False)
         self.initial_state_key = observation.state_key
@@ -70,8 +78,15 @@ class GraphSearchAgent(ArcAgentRuntime):
         self.reset_level()
         self.safety_shield = SafetyShield()
         self.understanding_agent = EnvUnderstandingAgent()
+        self.external_reasoners = ExternalReasonerHub()
         frame = env.reset()
         observation = self.hasher.observe(frame)
+        observation.notes.update(
+            self.external_reasoners.reset(
+                task_id=str(frame.info.get("guid", frame.info.get("game_id", "episode"))),
+                frame=frame,
+            )
+        )
         self.game_memory.world_model.update_from_observation(observation.notes)
         self.understanding_agent.inspect(env, observation, self.game_memory)
         self.graph.touch(observation.state_key, terminal=False)
@@ -114,6 +129,8 @@ class GraphSearchAgent(ArcAgentRuntime):
         before_notes = dict(observation.notes)
         prior_action_key = self.recent_action_keys[-1] if self.recent_action_keys else None
         next_observation = self.hasher.observe(frame, previous=observation.frame)
+        if hasattr(self, "external_reasoners"):
+            next_observation.notes.update(self.external_reasoners.observe_transition(action, frame))
         discovered_new_state = next_observation.state_key not in self.graph.nodes
         self.game_memory.world_model.update_from_observation(next_observation.notes)
         transition = Transition(
