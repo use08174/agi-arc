@@ -237,6 +237,38 @@ class GraphSearchAgent(ArcAgentRuntime):
     def _choose_action(self, step_idx: int, observation: Observation, actions: list[Action]) -> Action:
         original_actions = list(actions)
         actions = self._filter_useless_actions(observation, actions)
+        
+        # 1. 반복/정체 상태면 refinement보다 먼저 탈출 시도
+        if self._should_force_counterfactual_exploration():
+            counterfactual = self.explorer.choose_counterfactual_action(
+                observation=observation,
+                actions=actions,
+                graph=self.graph,
+                game_memory=self.game_memory,
+                recent_action_names=list(self.recent_actions),
+                recent_action_keys=list(self.recent_action_keys),
+            )
+            if counterfactual is not None:
+                self._clear_movement_commitment()
+                return self._trace_decision(
+                    step_idx,
+                    observation,
+                    counterfactual,
+                    "counterfactual_pre_refinement",
+                    "breaking repeated refinement plateau before refinement controller",
+                )
+
+            fallback_actions = self._prefer_unseen_actions(observation, actions, True)
+            if fallback_actions:
+                self._clear_movement_commitment()
+                return self._trace_decision(
+                    step_idx,
+                    observation,
+                    fallback_actions[0],
+                    "counterfactual_unseen_pre_refinement",
+                    "forcing unseen action before refinement controller",
+                )
+            
         committed_movement = self._continue_movement_commitment(actions)
         if committed_movement is not None:
             return self._trace_decision(
