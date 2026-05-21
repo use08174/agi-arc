@@ -1,6 +1,0 @@
-[submodule "vendor/ARC-MDL"]
-	path = vendor/ARC-MDL
-	url = https://github.com/sebferre/ARC-MDL.git
-[submodule "vendor/CompressARC"]
-	path = vendor/CompressARC
-	url = https://github.com/iliao2345/CompressARC.git
