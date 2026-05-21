@@ -16,7 +16,7 @@ def find_repo_root(explicit: str | None = None) -> Path:
     env_repo = os.getenv("AGI_ARC_REPO")
     if env_repo:
         candidates.append(Path(env_repo))
-    candidates.extend([Path.cwd(), Path.cwd().parent])
+    candidates.extend([Path.cwd(), Path.cwd().parent, Path("/kaggle/working/agi-arc")])
     kaggle_input = Path("/kaggle/input")
     if kaggle_input.exists():
         candidates.extend(sorted(path for path in kaggle_input.iterdir() if path.is_dir()))
@@ -29,6 +29,11 @@ def find_repo_root(explicit: str | None = None) -> Path:
 
 
 def prepare_official_repo(repo_dst: Path, agent_src: Path, agi_arc_repo: Path) -> None:
+    arcmdl_bin_candidates = [
+        agi_arc_repo / "vendor" / "ARC-MDL" / "bin" / "test",
+        agi_arc_repo / "vendor" / "ARC-MDL" / "src" / "test",
+    ]
+    arcmdl_bin = next((path for path in arcmdl_bin_candidates if path.exists()), None)
     shutil.copy(agent_src, repo_dst / "agents" / "templates" / "myagent.py")
     agents_init = textwrap.dedent(
         """
@@ -59,6 +64,10 @@ def prepare_official_repo(repo_dst: Path, agent_src: Path, agi_arc_repo: Path) -
         ARC_BASE_URL=http://gateway:8001
         ARC_API_KEY=test-key-123
         AGI_ARC_REPO={agi_arc_repo}
+        ARC_AGI3_USE_COMPRESSARC=1
+        ARC_AGI3_USE_ARCMDL=1
+        ARC_AGI3_RUN_ARCMDL_CLI={"1" if arcmdl_bin is not None else "0"}
+        ARC_AGI3_ARCMDL_BIN={arcmdl_bin if arcmdl_bin is not None else ""}
         RECORDINGS_DIR=/kaggle/working/server_recording
         DEBUG=False
         """
@@ -88,6 +97,18 @@ def run_submission(
     env["MPLBACKEND"] = "agg"
     env["PYTHONUNBUFFERED"] = "1"
     env["AGI_ARC_REPO"] = str(repo_root)
+    env.setdefault("ARC_AGI3_USE_COMPRESSARC", "1")
+    env.setdefault("ARC_AGI3_USE_ARCMDL", "1")
+    arcmdl_bin_candidates = [
+        repo_root / "vendor" / "ARC-MDL" / "bin" / "test",
+        repo_root / "vendor" / "ARC-MDL" / "src" / "test",
+    ]
+    detected_arcmdl_bin = next((path for path in arcmdl_bin_candidates if path.exists()), None)
+    if detected_arcmdl_bin is not None:
+        env.setdefault("ARC_AGI3_ARCMDL_BIN", str(detected_arcmdl_bin))
+        env.setdefault("ARC_AGI3_RUN_ARCMDL_CLI", "1")
+    else:
+        env.setdefault("ARC_AGI3_RUN_ARCMDL_CLI", "0")
     pythonpath = [str(repo_root / "src")]
     if env.get("PYTHONPATH"):
         pythonpath.append(env["PYTHONPATH"])

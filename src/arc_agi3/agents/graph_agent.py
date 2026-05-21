@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import Counter
 
 from arc_agi3.agents.base import ArcAgentRuntime
-from arc_agi3.agents.env_understanding_agent import EnvUnderstandingAgent
 from arc_agi3.core.types import Action, DecisionTrace, Frame, GameStatus, Observation, Transition
 from arc_agi3.envs.base import ArcEnvironment
 from arc_agi3.external import ExternalReasonerHub
@@ -19,7 +18,6 @@ class GraphSearchAgent(ArcAgentRuntime):
         self.last_episode_final_info = {}
         self.reset_level()
         self.safety_shield = SafetyShield()
-        self.understanding_agent = EnvUnderstandingAgent()
         self.external_reasoners = ExternalReasonerHub()
         observation = self.hasher.observe(frame)
         observation.notes.update(
@@ -77,7 +75,6 @@ class GraphSearchAgent(ArcAgentRuntime):
         self.last_episode_final_info = {}
         self.reset_level()
         self.safety_shield = SafetyShield()
-        self.understanding_agent = EnvUnderstandingAgent()
         self.external_reasoners = ExternalReasonerHub()
         frame = env.reset()
         observation = self.hasher.observe(frame)
@@ -88,7 +85,6 @@ class GraphSearchAgent(ArcAgentRuntime):
             )
         )
         self.game_memory.world_model.update_from_observation(observation.notes)
-        self.understanding_agent.inspect(env, observation, self.game_memory)
         self.graph.touch(observation.state_key, terminal=False)
         self.initial_state_key = observation.state_key
         self.recent_states.append(observation.state_key)
@@ -241,73 +237,42 @@ class GraphSearchAgent(ArcAgentRuntime):
     def _choose_action(self, step_idx: int, observation: Observation, actions: list[Action]) -> Action:
         original_actions = list(actions)
         actions = self._filter_useless_actions(observation, actions)
-        force_exploration = self._should_force_exploration(step_idx, observation)
-        actions = self._prefer_unseen_actions(observation, actions, force_exploration)
-        actions = self._reprioritize_click_actions(actions)
-        self._activate_experiment_if_idle(observation, actions, force_exploration)
         committed_movement = self._continue_movement_commitment(actions)
         if committed_movement is not None:
             return self._trace_decision(
                 step_idx,
                 observation,
                 committed_movement,
-                "explorer",
-                "continuing short movement sweep to expose more object relations",
+                "backend_commitment",
+                "continuing backend-guided movement sweep",
             )
-        experiment_step = self.experiment_runner.build_step_from_session(
-            session=self.game_memory.experiments.active_session,
-            actions=actions,
-            game_memory=self.game_memory,
-        )
-        if experiment_step is not None:
-            self.game_memory.experiments.note_plan_result(plannable=True)
-            self.game_memory.experiments.note_execution(experiment_step.action)
-            return self._trace_decision(step_idx, observation, experiment_step.action, "experiment", experiment_step.reason)
-        plan_outcome = self.game_memory.experiments.note_plan_result(
-            plannable=self.game_memory.experiments.active is None
-        )
-        if plan_outcome is not None:
-            self.game_memory.world_model.hypothesis_library.apply_experiment_result(
-                kind=plan_outcome.proposal.kind,
-                status=plan_outcome.status,
-                evidence=plan_outcome.evidence,
-            )
-        if self._should_force_counterfactual_exploration():
-            counterfactual = self.explorer.choose_counterfactual_action(
-                observation=observation,
-                actions=actions,
-                graph=self.graph,
-                game_memory=self.game_memory,
-                recent_action_names=list(self.recent_actions),
-                recent_action_keys=list(self.recent_action_keys),
-            )
-            if counterfactual is not None:
-                return self._trace_decision(step_idx, observation, counterfactual, "counterfactual", "breaking repetitive low-progress action loop")
-        if not force_exploration:
-            plan = self.planner.build_plan(
-                observation=observation,
-                actions=actions,
-                graph=self.graph,
-                game_memory=self.game_memory,
-                recent_states=set(self.recent_states),
-                recent_action_keys=list(self.recent_action_keys),
-                recent_action_families=list(self.recent_action_families),
-            )
-            if plan:
-                step = plan[0]
-                return self._trace_decision(step_idx, observation, step.action, "planner", step.reason)
-        action = self.explorer.choose_action(
+        decision = self.backend_controller.choose_action(
             observation=observation,
             actions=actions,
             graph=self.graph,
             game_memory=self.game_memory,
-            recent_states=set(self.recent_states),
-            force_exploration=force_exploration,
+            recent_action_keys=list(self.recent_action_keys),
+            recent_action_families=list(self.recent_action_families),
+            recent_states=list(self.recent_states),
         )
-        if action is None:
+        if decision is not None:
+            return self._trace_decision(step_idx, observation, decision.action, decision.source, decision.reason)
+        if self._should_force_counterfactual_exploration():
+            fallback_actions = self._prefer_unseen_actions(observation, actions, True)
+            if fallback_actions:
+                action = fallback_actions[0]
+                return self._trace_decision(
+                    step_idx,
+                    observation,
+                    action,
+                    "backend_counterfactual",
+                    "forcing unfamiliar action to break backend plateau",
+                )
+        if not actions:
             fallback = self._fallback_action(observation, actions or original_actions)
             return self._trace_decision(step_idx, observation, fallback, "fallback", "no ranked frontier action")
-        return self._trace_decision(step_idx, observation, action, "explorer", "frontier selection")
+        action = actions[0]
+        return self._trace_decision(step_idx, observation, action, "backend_fallback", "defaulting to remaining backend-safe action")
 
     def _prefer_unseen_actions(self, observation: Observation, actions: list[Action], force_exploration: bool) -> list[Action]:
         if not actions:

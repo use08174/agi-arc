@@ -13,6 +13,9 @@ def _ensure_repo_src_on_path() -> None:
         candidates.append(Path(env_repo) / "src")
     candidates.extend(
         [
+            Path(__file__).resolve().parents[1] / "src",
+            Path.cwd() / "src",
+            Path.cwd().parent / "src",
             Path("/kaggle/working/agi-arc/src"),
             Path("/kaggle/input/agi-arc/src"),
         ]

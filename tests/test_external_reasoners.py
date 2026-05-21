@@ -14,6 +14,8 @@ def test_external_reasoner_hub_exports_both_reasoners():
     assert "external_arcmdl" in notes0
     assert notes0["external_compressarc"]["available"] is True
     assert notes0["external_arcmdl"]["available"] is True
+    assert notes0["external_arcmdl"]["mode"] in {"image_only", "compiled_cli", "compiled_unstructured", "compiled_failed"}
+    assert "task_json" in notes0["external_arcmdl"]
 
     frame1 = Frame(
         grid=((1, 0), (0, 1)),

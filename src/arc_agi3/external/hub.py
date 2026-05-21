@@ -69,8 +69,33 @@ class ExternalReasonerHub:
                 notes["external_reasoner_summary"].append(
                     "arcmdl:"
                     f"train={info.get('train_examples')} "
-                    f"compiled={int(bool(info.get('compiled_binary')))}"
+                    f"compiled={int(bool(info.get('compiled_binary')))} "
+                    f"mode={info.get('mode', 'unknown')}"
                 )
                 notes["arcmdl_compiled_available"] = bool(info.get("compiled_binary"))
+                notes["arcmdl_mode"] = str(info.get("mode", "unknown"))
+                notes["arcmdl_model_present"] = bool(info.get("md_model_present", False))
 
+        notes.update(self._runtime_hints(notes))
         return notes
+
+    def _runtime_hints(self, notes: dict[str, Any]) -> dict[str, Any]:
+        same_size = bool(notes.get("compressarc_in_out_same_size")) and bool(notes.get("compressarc_all_in_same_size"))
+        all_out_same_size = bool(notes.get("compressarc_all_out_same_size"))
+        n_colors = int(notes.get("compressarc_n_colors", 0) or 0)
+        if same_size and n_colors <= 3:
+            family = "navigation"
+            probe_bias = "movement_first"
+        elif same_size and n_colors >= 4:
+            family = "transform"
+            probe_bias = "simple_actions_first"
+        elif not same_size or not all_out_same_size or n_colors >= 5:
+            family = "editing"
+            probe_bias = "simple_then_click"
+        else:
+            family = "unknown"
+            probe_bias = "simple_actions_first"
+        return {
+            "external_task_family": family,
+            "external_probe_bias": probe_bias,
+        }

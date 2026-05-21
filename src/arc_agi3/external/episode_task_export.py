@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from arc_agi3.core.types import Action, Frame
 
@@ -48,6 +50,12 @@ class EpisodeTaskExporter:
             "train": train_examples,
             "test": [{"input": _grid_to_list(self._frames[-1].grid)}],
         }
+
+    def write_problem_json(self, output_path: Path) -> Path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as handle:
+            json.dump(self.build_problem(), handle)
+        return output_path
 
     def metadata(self) -> dict[str, int]:
         return {
