@@ -68,8 +68,10 @@ class ActionRealizer:
         recent_action_keys: list[str],
     ) -> list[Action]:
         key_counts = Counter(recent_action_keys[-8:])
+        recent_tail = recent_action_keys[-6:]
         ranked = []
         previous_action_key = recent_action_keys[-1] if recent_action_keys else None
+
         for index, action in enumerate(candidates):
             semantic = game_memory.semantic_profile(action.name, action.key)
             successor = graph.seen_successor(observation.state_key, action)
@@ -78,11 +80,30 @@ class ActionRealizer:
                 action.key,
                 previous_action_key=previous_action_key,
             )
+
             immediate_repeat = int(previous_action_key == action.key)
+
+            # 추가: 최근 6스텝 안에 같은 action이 있었는지
+            recently_used = int(action.key in recent_tail)
+
+            # 추가: 최근 6스텝에서 2번 이상 쓴 action은 강하게 penalty
+            repeated_in_window = int(key_counts.get(action.key, 0) >= 2)
+
+            # 추가: 성과 없는 반복 action이면 더 강한 penalty
+            no_progress_repeat = int(
+                key_counts.get(action.key, 0) >= 2
+                and semantic.reward_total <= 0
+                and semantic.changed_uses == 0
+            )
+
             target_distance = self._target_distance(action, set(intent.target or ())) if intent.op == ObjectOp.PROBE_CLICK else 0
+
             ranked.append(
                 (
                     game_memory.is_dangerous(observation.state_key, action.key),
+                    no_progress_repeat,
+                    repeated_in_window,
+                    recently_used,
                     immediate_repeat,
                     graph.action_was_tried(observation.state_key, action),
                     key_counts.get(action.key, 0),
@@ -95,6 +116,7 @@ class ActionRealizer:
                     action,
                 )
             )
+
         ranked.sort(key=lambda item: item[:-1])
         return [item[-1] for item in ranked]
 
