@@ -55,9 +55,64 @@ def test_refinement_controller_can_lower_editing_prior_to_click():
         actions=actions,
         graph=StateGraph(),
         game_memory=GameMemory(),
-        recent_action_keys=[],
+        recent_action_keys=["ACTION1"],
     )
 
     assert decision is not None
     assert decision.action.name == "ACTION6"
     assert decision.action.payload
+
+
+def test_refinement_controller_uses_coordinate_only_strategy():
+    observation = Observation(
+        state_key="coord",
+        frame=Frame(
+            grid=(
+                (0, 0, 0, 0),
+                (0, 2, 2, 0),
+                (0, 2, 0, 0),
+                (0, 0, 0, 0),
+            ),
+            status=GameStatus.IN_PROGRESS,
+        ),
+        changed=True,
+        notes={},
+    )
+    actions = [Action("ACTION6", {"x": 1, "y": 1}), Action("ACTION6", {"x": 3, "y": 3})]
+
+    decision = RefinementController(AgentConfig()).choose_action(
+        observation=observation,
+        actions=actions,
+        graph=StateGraph(),
+        game_memory=GameMemory(),
+        recent_action_keys=[],
+    )
+
+    assert decision is not None
+    assert decision.action.name == "ACTION6"
+    assert "coordinate_only" in decision.reason
+
+
+def test_refinement_controller_uses_movement_only_strategy():
+    observation = Observation(
+        state_key="move",
+        frame=Frame(
+            grid=((0, 1, 0), (0, 0, 0), (0, 0, 0)),
+            status=GameStatus.IN_PROGRESS,
+        ),
+        changed=True,
+        notes={},
+    )
+    actions = [Action("ACTION1"), Action("ACTION2"), Action("ACTION3"), Action("ACTION4")]
+
+    decision = RefinementController(AgentConfig()).choose_action(
+        observation=observation,
+        actions=actions,
+        graph=StateGraph(),
+        game_memory=GameMemory(),
+        recent_action_keys=[],
+    )
+
+    assert decision is not None
+    assert decision.action.name in {"ACTION1", "ACTION2", "ACTION3", "ACTION4"}
+    assert "movement_only" in decision.reason

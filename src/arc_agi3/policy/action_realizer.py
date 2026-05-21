@@ -24,7 +24,7 @@ class ActionRealizer:
             return None
         for intent in intents:
             candidates = self._candidates_for_intent(intent, actions, game_memory, recent_action_keys)
-            candidates = self._rank_candidates(candidates, observation, graph, game_memory, recent_action_keys)
+            candidates = self._rank_candidates(candidates, intent, observation, graph, game_memory, recent_action_keys)
             if candidates:
                 return candidates[0], intent.rationale or intent.op.value
         return None
@@ -44,13 +44,7 @@ class ActionRealizer:
             click_actions = [action for action in actions if action.payload]
             targets = set(intent.target or [])
             if targets:
-                preferred = [
-                    action
-                    for action in click_actions
-                    if (int(action.payload.get("x", -1)), int(action.payload.get("y", -1))) in targets
-                ]
-                if preferred:
-                    return preferred
+                return sorted(click_actions, key=lambda action: self._target_distance(action, targets))
             return click_actions
         if intent.op in {ObjectOp.PROBE_TRANSFORM, ObjectOp.PROBE_ALIGNMENT}:
             return [action for action in actions if not action.payload] + [action for action in actions if action.payload]
@@ -67,6 +61,7 @@ class ActionRealizer:
     def _rank_candidates(
         self,
         candidates: list[Action],
+        intent: AbstractIntent,
         observation: Observation,
         graph: StateGraph,
         game_memory: GameMemory,
@@ -84,6 +79,7 @@ class ActionRealizer:
                 previous_action_key=previous_action_key,
             )
             immediate_repeat = int(previous_action_key == action.key)
+            target_distance = self._target_distance(action, set(intent.target or ())) if intent.op == ObjectOp.PROBE_CLICK else 0
             ranked.append(
                 (
                     game_memory.is_dangerous(observation.state_key, action.key),
@@ -91,6 +87,7 @@ class ActionRealizer:
                     graph.action_was_tried(observation.state_key, action),
                     key_counts.get(action.key, 0),
                     successor is not None,
+                    target_distance,
                     -uncertainty,
                     -semantic.reward_total,
                     -semantic.changed_uses,
@@ -100,3 +97,10 @@ class ActionRealizer:
             )
         ranked.sort(key=lambda item: item[:-1])
         return [item[-1] for item in ranked]
+
+    def _target_distance(self, action: Action, targets: set[tuple[int, int]]) -> int:
+        if not targets or not action.payload:
+            return 0
+        x = int(action.payload.get("x", -1))
+        y = int(action.payload.get("y", -1))
+        return min(abs(x - tx) + abs(y - ty) for tx, ty in targets)

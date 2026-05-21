@@ -10,7 +10,121 @@ class HypothesisRefiner:
     def generate(self, state: LiftedState) -> list[Hypothesis]:
         notes = state.notes
         family = str(notes.get("external_task_family", "unknown"))
+        control_family = str(notes.get("runtime_control_family", "unknown"))
+        strategy = str(notes.get("runtime_recommended_strategy", "generic_refinement_probe"))
+        movement_probe_done = bool(notes.get("runtime_movement_probe_done", False))
+        mode_probe_done = bool(notes.get("runtime_mode_probe_done", True))
+        coordinate_probe_count = int(notes.get("runtime_coordinate_probe_count", 0) or 0)
         hypotheses: list[Hypothesis] = []
+
+        if control_family == "coordinate_only":
+            hypotheses.append(
+                Hypothesis(
+                    kind=HypothesisKind.EDITABLE_REGION,
+                    summary=f"{strategy}: probe object-derived coordinate candidates",
+                    target=state.candidate_clicks[:12],
+                    confidence=0.8,
+                    uncertainty=0.25,
+                    evidence=["ACTION6 is the only effective control family"],
+                )
+            )
+            if len(state.markers) >= 2:
+                hypotheses.append(
+                    Hypothesis(
+                        kind=HypothesisKind.ALIGNMENT_GOAL,
+                        summary="coordinate-only task may be solved by selecting matching markers",
+                        target=tuple(marker.center for marker in state.markers[:6]),
+                        confidence=0.45,
+                        uncertainty=0.35,
+                        evidence=["compact marker candidates"],
+                    )
+                )
+            return hypotheses
+
+        if control_family == "movement_only":
+            hypotheses.append(
+                Hypothesis(
+                    kind=HypothesisKind.MOVEMENT_AXIS,
+                    summary=f"{strategy}: learn ACTION1-4 movement axes",
+                    confidence=0.75,
+                    uncertainty=0.25,
+                    evidence=["only simple movement-like actions are available"],
+                )
+            )
+            return hypotheses
+
+        if control_family == "movement_mode":
+            if not mode_probe_done:
+                hypotheses.append(
+                    Hypothesis(
+                        kind=HypothesisKind.MODE_SWITCH,
+                        summary="probe ACTION5/ACTION7 before committing to movement model",
+                        confidence=0.8,
+                        uncertainty=0.3,
+                        evidence=["movement plus mode/tool action signature"],
+                    )
+                )
+            hypotheses.append(
+                Hypothesis(
+                    kind=HypothesisKind.MOVEMENT_AXIS,
+                    summary=f"{strategy}: compare movement effects before and after mode actions",
+                    confidence=0.65,
+                    uncertainty=0.35,
+                    evidence=["movement plus mode/tool action signature"],
+                )
+            )
+            return hypotheses
+
+        if control_family in {"mixed_move_coordinate", "coordinate_mode"}:
+            if not mode_probe_done:
+                hypotheses.append(
+                    Hypothesis(
+                        kind=HypothesisKind.MODE_SWITCH,
+                        summary="probe tool/mode action before coordinate interactions",
+                        confidence=0.75,
+                        uncertainty=0.3,
+                        evidence=["coordinate task exposes ACTION5/ACTION7"],
+                    )
+                )
+            if not movement_probe_done and control_family == "mixed_move_coordinate":
+                hypotheses.append(
+                    Hypothesis(
+                        kind=HypothesisKind.MOVEMENT_AXIS,
+                        summary="briefly learn simple action effects, then switch to object clicks",
+                        confidence=0.62,
+                        uncertainty=0.35,
+                        evidence=["mixed movement and coordinate action signature"],
+                    )
+                )
+            if control_family == "mixed_move_coordinate" and not movement_probe_done:
+                click_confidence = 0.45
+            elif coordinate_probe_count == 0:
+                click_confidence = 0.78
+            else:
+                click_confidence = 0.68
+            hypotheses.append(
+                Hypothesis(
+                    kind=HypothesisKind.EDITABLE_REGION,
+                    summary=f"{strategy}: use object-aware ACTION6 candidates",
+                    target=state.candidate_clicks[:12],
+                    confidence=click_confidence,
+                    uncertainty=0.25,
+                    evidence=["public source priors favor mixed move-coordinate controls"],
+                )
+            )
+            if len(state.markers) >= 2:
+                hypotheses.append(
+                    Hypothesis(
+                        kind=HypothesisKind.ALIGNMENT_GOAL,
+                        summary="small marker/object relations may define coordinate targets",
+                        target=tuple(marker.center for marker in state.markers[:6]),
+                        confidence=0.5,
+                        uncertainty=0.35,
+                        evidence=["multiple compact marker candidates"],
+                    )
+                )
+            return hypotheses
+
         if family in {"navigation", "unknown"}:
             hypotheses.append(
                 Hypothesis(
@@ -24,7 +138,7 @@ class HypothesisRefiner:
                 Hypothesis(
                     kind=HypothesisKind.EDITABLE_REGION,
                     summary="actions may edit a workspace or select a tool",
-                    target=state.candidate_clicks[:6],
+                    target=state.candidate_clicks[:8],
                     evidence=["high color/layout complexity"],
                 )
             )

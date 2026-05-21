@@ -106,19 +106,45 @@ class StateLifter:
         width = len(frame.grid[0]) if frame.grid else 0
         height = len(frame.grid)
         candidates: list[tuple[int, int]] = []
-        for obj in objects[:16]:
-            candidates.append(obj.center)
+        compact = [obj for obj in objects if obj.area <= 64 and not self._touches_edge(obj, width, height)]
+        large = [obj for obj in objects if obj.area > 64 and not self._touches_edge(obj, width, height)]
+        ordered = compact + large + [obj for obj in objects if self._touches_edge(obj, width, height)]
+        for obj in ordered[:20]:
+            candidates.extend(self._object_click_points(obj))
         if width and height:
             candidates.extend(
                 [
                     (0, 0),
                     (width - 1, 0),
                     (0, height - 1),
+                    (width - 1, height - 1),
                     (width // 2, height // 2),
                 ]
             )
         deduped: list[tuple[int, int]] = []
         for xy in candidates:
+            if width and height and not (0 <= xy[0] < width and 0 <= xy[1] < height):
+                continue
             if xy not in deduped:
                 deduped.append(xy)
-        return tuple(deduped[:20])
+        return tuple(deduped[:40])
+
+    def _object_click_points(self, obj: LiftedObject) -> list[tuple[int, int]]:
+        min_x, min_y, max_x, max_y = obj.bbox
+        mid_x = (min_x + max_x) // 2
+        mid_y = (min_y + max_y) // 2
+        return [
+            obj.center,
+            (min_x, min_y),
+            (max_x, min_y),
+            (min_x, max_y),
+            (max_x, max_y),
+            (mid_x, min_y),
+            (mid_x, max_y),
+            (min_x, mid_y),
+            (max_x, mid_y),
+        ]
+
+    def _touches_edge(self, obj: LiftedObject, width: int, height: int) -> bool:
+        min_x, min_y, max_x, max_y = obj.bbox
+        return min_x <= 0 or min_y <= 0 or max_x >= width - 1 or max_y >= height - 1
