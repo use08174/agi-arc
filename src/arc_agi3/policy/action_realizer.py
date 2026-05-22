@@ -5,11 +5,15 @@ from collections import Counter
 from arc_agi3.abstraction.object_ops import AbstractIntent, ObjectOp
 from arc_agi3.core.types import Action, Observation
 from arc_agi3.memory.game_memory import GameMemory
+from arc_agi3.policy.coordinate_policy import CoordinateInteractionPolicy
 from arc_agi3.memory.state_graph import StateGraph
 
 
 class ActionRealizer:
     """Lower object-level intents into concrete ARC-AGI-3 actions."""
+
+    def __init__(self) -> None:
+        self.coordinate_policy = CoordinateInteractionPolicy()
 
     def realize(
         self,
@@ -23,7 +27,9 @@ class ActionRealizer:
         if not actions:
             return None
         for intent in intents:
-            candidates = self._candidates_for_intent(intent, actions, game_memory, recent_action_keys)
+            candidates = self._candidates_for_intent(intent, actions, observation, game_memory, recent_action_keys)
+            if intent.op == ObjectOp.PROBE_CLICK and candidates:
+                return candidates[0], intent.rationale or intent.op.value
             candidates = self._rank_candidates(candidates, intent, observation, graph, game_memory, recent_action_keys)
             if candidates:
                 return candidates[0], intent.rationale or intent.op.value
@@ -33,6 +39,7 @@ class ActionRealizer:
         self,
         intent: AbstractIntent,
         actions: list[Action],
+        observation: Observation,
         game_memory: GameMemory,
         recent_action_keys: list[str],
     ) -> list[Action]:
@@ -41,11 +48,13 @@ class ActionRealizer:
         if intent.op == ObjectOp.PROBE_MODE:
             return [action for action in actions if not action.payload and action.name in {"ACTION5", "ACTION7"}] or [action for action in actions if not action.payload]
         if intent.op == ObjectOp.PROBE_CLICK:
-            click_actions = [action for action in actions if action.payload]
-            targets = set(intent.target or [])
-            if targets:
-                return sorted(click_actions, key=lambda action: self._target_distance(action, targets))
-            return click_actions
+            return self.coordinate_policy.rank(
+                actions=actions,
+                intent=intent,
+                observation=observation,
+                game_memory=game_memory,
+                recent_action_keys=recent_action_keys,
+            )
         if intent.op in {ObjectOp.PROBE_TRANSFORM, ObjectOp.PROBE_ALIGNMENT}:
             return [action for action in actions if not action.payload] + [action for action in actions if action.payload]
         if intent.op == ObjectOp.EXPLOIT_KNOWN_EFFECT:

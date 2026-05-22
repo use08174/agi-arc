@@ -48,6 +48,11 @@ class GameMemory:
     action_alignment_positive_counts: dict[str, int] = field(default_factory=dict)
     action_family_alignment_delta_total: dict[str, float] = field(default_factory=dict)
     action_family_alignment_positive_counts: dict[str, int] = field(default_factory=dict)
+    coordinate_role_success: dict[str, int] = field(default_factory=dict)
+    coordinate_role_failure: dict[str, int] = field(default_factory=dict)
+    coordinate_key_cooldowns: dict[str, int] = field(default_factory=dict)
+    coordinate_row_cooldowns: dict[int, int] = field(default_factory=dict)
+    coordinate_top_band_uses: int = 0
     learned_action_semantics: ActionSemanticsModel = field(default_factory=ActionSemanticsModel)
     action_effects: ActionEffectModel = field(default_factory=ActionEffectModel)
     effect_uncertainty: ActionEffectEnsemble = field(default_factory=ActionEffectEnsemble)
@@ -144,6 +149,30 @@ class GameMemory:
         self.action_family_alignment_delta_total[family] = self.action_family_alignment_delta_total.get(family, 0.0) + alignment_delta
         if alignment_delta > 0:
             self.action_family_alignment_positive_counts[family] = self.action_family_alignment_positive_counts.get(family, 0) + 1
+
+    def decay_coordinate_memory(self) -> None:
+        self.coordinate_key_cooldowns = {
+            key: value - 1 for key, value in self.coordinate_key_cooldowns.items() if value > 1
+        }
+        self.coordinate_row_cooldowns = {
+            key: value - 1 for key, value in self.coordinate_row_cooldowns.items() if value > 1
+        }
+
+    def remember_coordinate_click(self, action_key: str, role: str, row: int, *, success: bool) -> None:
+        if success:
+            self.coordinate_role_success[role] = self.coordinate_role_success.get(role, 0) + 1
+            self.coordinate_key_cooldowns[action_key] = max(self.coordinate_key_cooldowns.get(action_key, 0), 6)
+        else:
+            self.coordinate_role_failure[role] = self.coordinate_role_failure.get(role, 0) + 1
+            self.coordinate_key_cooldowns[action_key] = max(self.coordinate_key_cooldowns.get(action_key, 0), 20)
+            self.coordinate_row_cooldowns[row] = max(self.coordinate_row_cooldowns.get(row, 0), 8)
+        if role in {"top_band", "tool_or_palette", "reference"}:
+            self.coordinate_top_band_uses += 1
+
+    def coordinate_role_score(self, role: str) -> float:
+        success = self.coordinate_role_success.get(role, 0)
+        failure = self.coordinate_role_failure.get(role, 0)
+        return (success + 1.0) / (success + failure + 2.0)
 
     def action_alignment_score(self, action_key: str) -> float:
         uses = max(1, self.action_use_counts.get(action_key, 0))

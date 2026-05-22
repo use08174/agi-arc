@@ -8,6 +8,7 @@ from arc_agi3.exploration.frontier import FrontierExplorer
 from arc_agi3.memory.game_memory import GameMemory
 from arc_agi3.memory.state_graph import StateGraph
 from arc_agi3.perception.hasher import StateHasher
+from arc_agi3.policy.coordinate_policy import CoordinateInteractionPolicy
 from arc_agi3.policy.refinement_controller import RefinementController
 from arc_agi3.planning.experiment_policy import ExperimentPolicy
 from arc_agi3.planning.experiment_runner import ExperimentRunner
@@ -27,6 +28,7 @@ class ArcAgentRuntime:
         self.experiment_policy = ExperimentPolicy()
         self.experiment_runner = ExperimentRunner()
         self.refinement_controller = RefinementController(self.config)
+        self.coordinate_policy = CoordinateInteractionPolicy()
         self.scene_delta_interpreter = SceneDeltaInterpreter()
         self.goal_progress_scorer = GoalProgressScorer()
         self.game_memory = GameMemory()

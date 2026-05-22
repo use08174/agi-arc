@@ -127,6 +127,8 @@ class GraphSearchAgent(ArcAgentRuntime):
         next_observation = self.hasher.observe(frame, previous=observation.frame)
         if hasattr(self, "external_reasoners"):
             next_observation.notes.update(self.external_reasoners.observe_transition(action, frame))
+        next_observation.notes["grid_height"] = len(frame.grid)
+        next_observation.notes["grid_width"] = len(frame.grid[0]) if frame.grid else 0
         scene_delta = self.scene_delta_interpreter.interpret(observation, next_observation, action)
         next_observation.notes.update(scene_delta.to_notes())
         next_observation.notes.update(
@@ -181,6 +183,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         )
         next_observation.notes.update(progress_signal.to_notes())
         transition.notes.update(progress_signal.to_notes())
+        self._learn_coordinate_interaction(action, transition)
         semantic_progress = progress_signal.is_progress
         previous_state = self.recent_states[-2] if len(self.recent_states) >= 2 else None
         signature = self.game_memory.action_effects.observe(
@@ -460,6 +463,16 @@ class GraphSearchAgent(ArcAgentRuntime):
             self.game_memory.remember_effect(transition.action.name, transition.action.key, "collectible_progress")
         if transition.terminal and not transition.won:
             self.game_memory.remember_danger(transition.action.key, transition.from_state)
+
+    def _learn_coordinate_interaction(self, action: Action, transition: Transition) -> None:
+        self.game_memory.decay_coordinate_memory()
+        classified = self.coordinate_policy.classify_transition(action, transition.notes)
+        if classified is None:
+            return
+        role, success, row = classified
+        self.game_memory.remember_coordinate_click(action.key, role, row, success=success)
+        transition.notes["coordinate_click_role"] = role
+        transition.notes["coordinate_click_success"] = success
 
     def _filter_useless_actions(self, observation: Observation, actions: list[Action]) -> list[Action]:
         filtered = []
