@@ -58,3 +58,24 @@ def test_coordinate_policy_cools_failed_coordinate():
     )
 
     assert ranked[0].payload == {"x": 6, "y": 7}
+
+
+def test_coordinate_policy_does_not_treat_top_band_delta_as_success():
+    action = Action("ACTION6", {"x": 7, "y": 1})
+    notes = {
+        "grid_width": 64,
+        "grid_height": 64,
+        "scene_delta_kind": "object_transform",
+        "scene_goal_progress_score": 0.9,
+        "progress_score": 1.5,
+        "changed_playfield_cells": 12,
+        "changed_hud_cells": 0,
+        "reward_delta": 0.0,
+        "won": False,
+    }
+
+    role, success, row = CoordinateInteractionPolicy().classify_transition(action, notes)
+
+    assert role == "top_band"
+    assert row == 1
+    assert success is False

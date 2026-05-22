@@ -193,6 +193,12 @@ class GoalProgressScorer:
         after_notes: dict[str, Any],
         delta: SceneDelta,
     ) -> dict[str, object]:
+        click_role = str(after_notes.get("coordinate_click_role", ""))
+        if click_role in {"top_band", "tool_or_palette", "reference"}:
+            return {
+                "scene_goal_progress_score": 0.0,
+                "scene_goal_progress_reasons": ["top_band_click_not_goal_progress"],
+            }
         goals = set(str(goal) for goal in before_notes.get("scene_goal_kinds", []))
         reasons: list[str] = []
         score = 0.0

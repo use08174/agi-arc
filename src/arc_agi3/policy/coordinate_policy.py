@@ -64,7 +64,6 @@ class CoordinateInteractionPolicy:
         height = int(notes.get("grid_height", 0) or 0)
         width = int(notes.get("grid_width", 0) or 0)
         role = self._role_from_notes(x, y, width, height, notes)
-        progress = float(notes.get("progress_score", 0.0) or 0.0)
         scene_progress = float(notes.get("scene_goal_progress_score", 0.0) or 0.0)
         scene_delta = str(notes.get("scene_delta_kind", "no_object_delta"))
         changed_playfield = int(notes.get("changed_playfield_cells", 0) or 0)
@@ -72,7 +71,9 @@ class CoordinateInteractionPolicy:
         likely_feedback = bool(notes.get("likely_feedback_flash", False))
         hud_only = changed_hud > 0 and changed_playfield == 0
         meaningful_delta = scene_delta not in {"no_object_delta", "object_appeared"} or changed_playfield > 0
-        success = scene_progress > 0 or progress >= 0.45 or (meaningful_delta and not likely_feedback and not hud_only)
+        success = scene_progress > 0 or (meaningful_delta and not likely_feedback and not hud_only)
+        if role in {"top_band", "tool_or_palette", "reference"} and not bool(notes.get("won", False)) and float(notes.get("reward_delta", 0.0) or 0.0) <= 0:
+            success = False
         if hud_only and scene_progress <= 0:
             role = "tool_or_palette"
             success = False

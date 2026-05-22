@@ -21,7 +21,8 @@ class HypothesisRefiner:
         nav_next_step_delta = notes.get("nav_next_step_delta")
         hypotheses: list[Hypothesis] = []
 
-        hypotheses.extend(self._goal_conditioned_hypotheses(scene_goals, scene_targets))
+        allow_goal_coordinate_bias = not (control_family == "mixed_move_coordinate" and not movement_probe_done)
+        hypotheses.extend(self._goal_conditioned_hypotheses(scene_goals, scene_targets, allow_coordinate_bias=allow_goal_coordinate_bias))
 
         if control_family == "coordinate_only":
             hypotheses.append(
@@ -105,7 +106,7 @@ class HypothesisRefiner:
                     )
                 )
             if control_family == "mixed_move_coordinate" and not movement_probe_done:
-                click_confidence = 0.45
+                click_confidence = 0.05
             elif coordinate_probe_count == 0:
                 click_confidence = 0.78
             else:
@@ -175,9 +176,11 @@ class HypothesisRefiner:
         self,
         scene_goals: list[str],
         scene_targets: tuple[object, ...],
+        *,
+        allow_coordinate_bias: bool = True,
     ) -> list[Hypothesis]:
         hypotheses: list[Hypothesis] = []
-        if "paint_reference" in scene_goals:
+        if allow_coordinate_bias and "paint_reference" in scene_goals:
             hypotheses.append(
                 Hypothesis(
                     kind=HypothesisKind.EDITABLE_REGION,
@@ -188,7 +191,7 @@ class HypothesisRefiner:
                     evidence=["scene blueprint inferred paint_reference"],
                 )
             )
-        if "match_shape" in scene_goals or "align_markers" in scene_goals:
+        if allow_coordinate_bias and ("match_shape" in scene_goals or "align_markers" in scene_goals):
             hypotheses.append(
                 Hypothesis(
                     kind=HypothesisKind.ALIGNMENT_GOAL,

@@ -59,6 +59,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         done = frame.status in {GameStatus.WIN, GameStatus.GAME_OVER}
         won = frame.status == GameStatus.WIN
         next_observation = self._integrate_transition(
+            step_idx=max(0, getattr(self, "_external_step_idx", 1) - 1),
             observation=observation,
             action=action,
             frame=frame,
@@ -95,6 +96,7 @@ class GraphSearchAgent(ArcAgentRuntime):
             self._print_action_trace(step_idx, observation, action)
             result = env.step(action)
             next_observation = self._integrate_transition(
+                step_idx=step_idx,
                 observation=observation,
                 action=action,
                 frame=result.frame,
@@ -115,6 +117,7 @@ class GraphSearchAgent(ArcAgentRuntime):
 
     def _integrate_transition(
         self,
+        step_idx: int,
         observation: Observation,
         action: Action,
         frame: Frame,
@@ -129,8 +132,15 @@ class GraphSearchAgent(ArcAgentRuntime):
             next_observation.notes.update(self.external_reasoners.observe_transition(action, frame))
         next_observation.notes["grid_height"] = len(frame.grid)
         next_observation.notes["grid_width"] = len(frame.grid[0]) if frame.grid else 0
+        next_observation.notes["reward_delta"] = reward_delta
+        next_observation.notes["won"] = won
         scene_delta = self.scene_delta_interpreter.interpret(observation, next_observation, action)
         next_observation.notes.update(scene_delta.to_notes())
+        coordinate_classification = self.coordinate_policy.classify_transition(action, next_observation.notes)
+        if coordinate_classification is not None:
+            role, _, row = coordinate_classification
+            next_observation.notes["coordinate_click_role"] = role
+            next_observation.notes["coordinate_click_row"] = row
         next_observation.notes.update(
             self.goal_progress_scorer.score(
                 before_notes=before_notes,
@@ -184,7 +194,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         next_observation.notes.update(progress_signal.to_notes())
         transition.notes.update(progress_signal.to_notes())
         self._learn_coordinate_interaction(action, transition)
-        self._print_transition_trace(len(self.recent_action_keys), transition)
+        self._print_transition_trace(step_idx, transition)
         semantic_progress = progress_signal.is_progress
         previous_state = self.recent_states[-2] if len(self.recent_states) >= 2 else None
         signature = self.game_memory.action_effects.observe(
