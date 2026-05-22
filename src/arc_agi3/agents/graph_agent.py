@@ -184,6 +184,7 @@ class GraphSearchAgent(ArcAgentRuntime):
         next_observation.notes.update(progress_signal.to_notes())
         transition.notes.update(progress_signal.to_notes())
         self._learn_coordinate_interaction(action, transition)
+        self._print_transition_trace(len(self.recent_action_keys), transition)
         semantic_progress = progress_signal.is_progress
         previous_state = self.recent_states[-2] if len(self.recent_states) >= 2 else None
         signature = self.game_memory.action_effects.observe(
@@ -412,6 +413,26 @@ class GraphSearchAgent(ArcAgentRuntime):
             f"action_step={step_idx} state={observation.state_key} "
             f"action={action.key} source={source}"
         )
+
+    def _print_transition_trace(self, step_idx: int, transition: Transition) -> None:
+        notes = transition.notes
+        fields = {
+            "coordinate_click_role": notes.get("coordinate_click_role", "-"),
+            "coordinate_click_success": notes.get("coordinate_click_success", "-"),
+            "scene_delta_kind": notes.get("scene_delta_kind", "-"),
+            "scene_goal_progress_score": notes.get("scene_goal_progress_score", 0.0),
+            "progress_score": notes.get("progress_score", 0.0),
+            "progress_reasons": notes.get("progress_reasons", []),
+        }
+        formatted = " ".join(
+            f"{key}={self._trace_value(value)}" for key, value in fields.items()
+        )
+        print(f"transition_step={step_idx} action={transition.action.key} {formatted}")
+
+    def _trace_value(self, value: object) -> str:
+        if isinstance(value, list):
+            return "[" + ",".join(str(item) for item in value[:5]) + "]"
+        return str(value)
 
     def _should_force_counterfactual_exploration(self) -> bool:
         if self.steps_since_semantic_progress < self.config.budget.semantic_patience_steps:
