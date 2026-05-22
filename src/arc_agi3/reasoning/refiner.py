@@ -15,14 +15,18 @@ class HypothesisRefiner:
         movement_probe_done = bool(notes.get("runtime_movement_probe_done", False))
         mode_probe_done = bool(notes.get("runtime_mode_probe_done", True))
         coordinate_probe_count = int(notes.get("runtime_coordinate_probe_count", 0) or 0)
+        scene_goals = [str(goal) for goal in notes.get("scene_goal_kinds", [])]
+        scene_targets = tuple(notes.get("scene_goal_targets", []) or state.candidate_clicks[:12])
         hypotheses: list[Hypothesis] = []
+
+        hypotheses.extend(self._goal_conditioned_hypotheses(scene_goals, scene_targets))
 
         if control_family == "coordinate_only":
             hypotheses.append(
                 Hypothesis(
                     kind=HypothesisKind.EDITABLE_REGION,
                     summary=f"{strategy}: probe object-derived coordinate candidates",
-                    target=state.candidate_clicks[:12],
+                    target=scene_targets[:12],
                     confidence=0.8,
                     uncertainty=0.25,
                     evidence=["ACTION6 is the only effective control family"],
@@ -33,7 +37,7 @@ class HypothesisRefiner:
                     Hypothesis(
                         kind=HypothesisKind.ALIGNMENT_GOAL,
                         summary="coordinate-only task may be solved by selecting matching markers",
-                        target=tuple(marker.center for marker in state.markers[:6]),
+                        target=scene_targets[:12] or tuple(marker.center for marker in state.markers[:6]),
                         confidence=0.45,
                         uncertainty=0.35,
                         evidence=["compact marker candidates"],
@@ -106,7 +110,7 @@ class HypothesisRefiner:
                 Hypothesis(
                     kind=HypothesisKind.EDITABLE_REGION,
                     summary=f"{strategy}: use object-aware ACTION6 candidates",
-                    target=state.candidate_clicks[:12],
+                    target=scene_targets[:12],
                     confidence=click_confidence,
                     uncertainty=0.25,
                     evidence=["public source priors favor mixed move-coordinate controls"],
@@ -117,7 +121,7 @@ class HypothesisRefiner:
                     Hypothesis(
                         kind=HypothesisKind.ALIGNMENT_GOAL,
                         summary="small marker/object relations may define coordinate targets",
-                        target=tuple(marker.center for marker in state.markers[:6]),
+                        target=scene_targets[:12] or tuple(marker.center for marker in state.markers[:6]),
                         confidence=0.5,
                         uncertainty=0.35,
                         evidence=["multiple compact marker candidates"],
@@ -138,7 +142,7 @@ class HypothesisRefiner:
                 Hypothesis(
                     kind=HypothesisKind.EDITABLE_REGION,
                     summary="actions may edit a workspace or select a tool",
-                    target=state.candidate_clicks[:8],
+                    target=scene_targets[:8],
                     evidence=["high color/layout complexity"],
                 )
             )
@@ -161,6 +165,58 @@ class HypothesisRefiner:
             )
         if not hypotheses:
             hypotheses.append(Hypothesis(kind=HypothesisKind.UNKNOWN, summary="unknown structure; probe cheapest actions"))
+        return hypotheses
+
+    def _goal_conditioned_hypotheses(
+        self,
+        scene_goals: list[str],
+        scene_targets: tuple[object, ...],
+    ) -> list[Hypothesis]:
+        hypotheses: list[Hypothesis] = []
+        if "paint_reference" in scene_goals:
+            hypotheses.append(
+                Hypothesis(
+                    kind=HypothesisKind.EDITABLE_REGION,
+                    summary="scene goal suggests copying/painting a reference pattern",
+                    target=scene_targets[:14],
+                    confidence=0.7,
+                    uncertainty=0.25,
+                    evidence=["scene blueprint inferred paint_reference"],
+                )
+            )
+        if "match_shape" in scene_goals or "align_markers" in scene_goals:
+            hypotheses.append(
+                Hypothesis(
+                    kind=HypothesisKind.ALIGNMENT_GOAL,
+                    summary="scene goal suggests matching shapes or aligning markers",
+                    target=scene_targets[:14],
+                    confidence=0.68,
+                    uncertainty=0.3,
+                    evidence=["scene blueprint inferred relational goal"],
+                )
+            )
+        if "move_to_marker" in scene_goals or "clear_obstacle" in scene_goals:
+            hypotheses.append(
+                Hypothesis(
+                    kind=HypothesisKind.MOVEMENT_AXIS,
+                    summary="scene goal suggests moving toward markers or clearing blockers",
+                    target=scene_targets[:10],
+                    confidence=0.58,
+                    uncertainty=0.35,
+                    evidence=["scene blueprint inferred movement/blocker goal"],
+                )
+            )
+        if "transform_object" in scene_goals:
+            hypotheses.append(
+                Hypothesis(
+                    kind=HypothesisKind.OBJECT_TRANSFORM,
+                    summary="scene goal suggests rotating or transforming an active object",
+                    target=scene_targets[:10],
+                    confidence=0.55,
+                    uncertainty=0.4,
+                    evidence=["scene blueprint inferred transform goal"],
+                )
+            )
         return hypotheses
 
     def refine(self, hypotheses: list[Hypothesis]) -> list[Hypothesis]:

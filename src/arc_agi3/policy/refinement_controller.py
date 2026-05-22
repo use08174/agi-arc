@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from arc_agi3.abstraction.scene_blueprint import SceneBlueprintBuilder
 from arc_agi3.abstraction.state_lifter import StateLifter
 from arc_agi3.core.config import AgentConfig
 from arc_agi3.core.types import Action, Observation
@@ -10,6 +11,7 @@ from arc_agi3.policy.action_signature import classify_runtime_signature
 from arc_agi3.memory.state_graph import StateGraph
 from arc_agi3.policy.action_realizer import ActionRealizer
 from arc_agi3.reasoning.critic import HypothesisCritic
+from arc_agi3.reasoning.goal_inference import GoalInferencer, goals_to_notes
 from arc_agi3.reasoning.refiner import HypothesisRefiner
 from arc_agi3.reasoning.verifier import HypothesisVerifier
 
@@ -27,6 +29,8 @@ class RefinementController:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
         self.lifter = StateLifter()
+        self.blueprints = SceneBlueprintBuilder()
+        self.goal_inferencer = GoalInferencer()
         self.refiner = HypothesisRefiner()
         self.critic = HypothesisCritic()
         self.verifier = HypothesisVerifier()
@@ -46,6 +50,10 @@ class RefinementController:
         signature = classify_runtime_signature(actions, observation)
         lifted.notes.update(signature.to_notes())
         lifted.notes.update(self._probe_phase_notes(signature.action_names, recent_action_keys))
+        blueprint = self.blueprints.build(lifted)
+        goals = self.goal_inferencer.infer(blueprint)
+        lifted.notes.update(blueprint.to_notes())
+        lifted.notes.update(goals_to_notes(goals))
         hypotheses = self.refiner.generate(lifted)
         hypotheses = self.critic.critique(hypotheses, lifted)
         hypotheses = self.refiner.refine(hypotheses)
@@ -65,8 +73,13 @@ class RefinementController:
         return RefinementDecision(
             action=action,
             source="refinement",
-            reason=f"{signature.control_family}/{top}: {reason}",
+            reason=f"{signature.control_family}/{top}/{self._top_goal(goals)}: {reason}",
         )
+
+    def _top_goal(self, goals: object) -> str:
+        if isinstance(goals, list) and goals:
+            return str(getattr(goals[0].kind, "value", goals[0].kind))
+        return "unknown_goal"
 
     def _probe_phase_notes(self, action_names: tuple[str, ...], recent_action_keys: list[str]) -> dict[str, object]:
         tried_names = {key.split("|", 1)[0] for key in recent_action_keys}

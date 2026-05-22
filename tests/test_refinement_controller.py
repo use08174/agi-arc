@@ -91,6 +91,7 @@ def test_refinement_controller_uses_coordinate_only_strategy():
     assert decision is not None
     assert decision.action.name == "ACTION6"
     assert "coordinate_only" in decision.reason
+    assert any(goal in decision.reason for goal in ("paint_reference", "match_shape", "explore_causal_effects"))
 
 
 def test_refinement_controller_uses_movement_only_strategy():
