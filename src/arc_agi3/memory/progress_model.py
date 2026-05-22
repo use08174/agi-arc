@@ -49,6 +49,11 @@ class ProgressModel:
         if bool(after_notes.get("collectible_progress", False)):
             goal_progress += 0.75
             reasons.append("collectible_progress")
+        scene_goal_progress = float(after_notes.get("scene_goal_progress_score", 0.0) or 0.0)
+        if scene_goal_progress > 0:
+            goal_progress += min(0.45, scene_goal_progress)
+            scene_reasons = list(after_notes.get("scene_goal_progress_reasons", []) or [])
+            reasons.extend(str(reason) for reason in scene_reasons[:3])
         reference_alignment = float(after_notes.get("reference_workspace_alignment_score", 0.0) or 0.0)
         reference_delta = float(after_notes.get("reference_workspace_alignment_delta", 0.0) or 0.0)
         relation_same_color_improvement = float(after_notes.get("relation_nearest_same_color_improvement", 0.0) or 0.0)

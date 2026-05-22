@@ -127,6 +127,15 @@ class GraphSearchAgent(ArcAgentRuntime):
         next_observation = self.hasher.observe(frame, previous=observation.frame)
         if hasattr(self, "external_reasoners"):
             next_observation.notes.update(self.external_reasoners.observe_transition(action, frame))
+        scene_delta = self.scene_delta_interpreter.interpret(observation, next_observation, action)
+        next_observation.notes.update(scene_delta.to_notes())
+        next_observation.notes.update(
+            self.goal_progress_scorer.score(
+                before_notes=before_notes,
+                after_notes=next_observation.notes,
+                delta=scene_delta,
+            )
+        )
         discovered_new_state = next_observation.state_key not in self.graph.nodes
         self.game_memory.world_model.update_from_observation(next_observation.notes)
         transition = Transition(

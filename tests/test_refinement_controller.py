@@ -117,3 +117,37 @@ def test_refinement_controller_uses_movement_only_strategy():
     assert decision is not None
     assert decision.action.name in {"ACTION1", "ACTION2", "ACTION3", "ACTION4"}
     assert "movement_only" in decision.reason
+
+
+def test_refinement_controller_prefers_learned_move_toward_nav_path():
+    observation = Observation(
+        state_key="nav-path",
+        frame=Frame(
+            grid=(
+                (1, 1, 1, 1, 1),
+                (1, 2, 0, 0, 1),
+                (1, 1, 1, 0, 1),
+                (1, 3, 0, 0, 1),
+                (1, 1, 1, 1, 1),
+            ),
+            status=GameStatus.IN_PROGRESS,
+        ),
+        changed=True,
+        notes={"semantic_player_pos": (1, 1)},
+    )
+    memory = GameMemory()
+    memory.learned_action_semantics.meaning_for("ACTION4").move_vectors[(1, 0)] = 3
+    memory.learned_action_semantics.meaning_for("ACTION2").move_vectors[(0, 1)] = 3
+    actions = [Action("ACTION1"), Action("ACTION2"), Action("ACTION3"), Action("ACTION4")]
+
+    decision = RefinementController(AgentConfig()).choose_action(
+        observation=observation,
+        actions=actions,
+        graph=StateGraph(),
+        game_memory=memory,
+        recent_action_keys=["ACTION1", "ACTION3"],
+    )
+
+    assert decision is not None
+    assert decision.action.name in {"ACTION2", "ACTION4"}
+    assert observation.notes["nav_has_path"] is True

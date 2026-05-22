@@ -97,6 +97,7 @@ class ActionRealizer:
             )
 
             target_distance = self._target_distance(action, set(intent.target or ())) if intent.op == ObjectOp.PROBE_CLICK else 0
+            movement_alignment = self._movement_alignment_penalty(action, intent, observation, game_memory)
 
             ranked.append(
                 (
@@ -108,6 +109,7 @@ class ActionRealizer:
                     graph.action_was_tried(observation.state_key, action),
                     key_counts.get(action.key, 0),
                     successor is not None,
+                    movement_alignment,
                     target_distance,
                     -uncertainty,
                     -semantic.reward_total,
@@ -119,6 +121,24 @@ class ActionRealizer:
 
         ranked.sort(key=lambda item: item[:-1])
         return [item[-1] for item in ranked]
+
+    def _movement_alignment_penalty(
+        self,
+        action: Action,
+        intent: AbstractIntent,
+        observation: Observation,
+        game_memory: GameMemory,
+    ) -> int:
+        if intent.op != ObjectOp.PROBE_MOVE or action.payload:
+            return 0
+        desired = intent.target or observation.notes.get("nav_next_step_delta")
+        if not (isinstance(desired, tuple) and len(desired) == 2):
+            return 0
+        meaning = game_memory.learned_action_semantics.meaning_for(action.name)
+        if not meaning.move_vectors:
+            return 1
+        best_vector = meaning.move_vectors.most_common(1)[0][0]
+        return abs(int(best_vector[0]) - int(desired[0])) + abs(int(best_vector[1]) - int(desired[1]))
 
     def _target_distance(self, action: Action, targets: set[tuple[int, int]]) -> int:
         if not targets or not action.payload:

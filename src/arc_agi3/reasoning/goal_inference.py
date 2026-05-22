@@ -38,6 +38,9 @@ class GoalInferencer:
         goals: list[GoalHypothesis] = []
         relation_kinds = {relation.kind for relation in blueprint.relations}
         targets = blueprint.goal_targets[:16]
+        nav_has_path = bool(notes.get("nav_has_path", False))
+        nav_path_length = int(notes.get("nav_path_length", 0) or 0)
+        nav_blocked_targets = int(notes.get("nav_blocked_target_count", 0) or 0)
 
         if blueprint.repeated_shape_groups:
             goals.append(
@@ -76,19 +79,25 @@ class GoalInferencer:
                 GoalHypothesis(
                     kind=GoalKind.MOVE_TO_MARKER,
                     summary="movement controls may need to move an actor/object toward salient markers",
-                    confidence=0.48,
+                    confidence=0.68 if nav_has_path else 0.48,
                     targets=targets,
-                    evidence=["movement-like action signature"],
+                    evidence=[
+                        "movement-like action signature",
+                        f"navigation path length={nav_path_length}" if nav_has_path else "navigation path unknown",
+                    ],
                 )
             )
-            if blueprint.large_objects and blueprint.compact_objects:
+            if (blueprint.large_objects and blueprint.compact_objects) or nav_blocked_targets > 0:
                 goals.append(
                     GoalHypothesis(
                         kind=GoalKind.CLEAR_OBSTACLE,
                         summary="large regions and compact objects suggest obstacles or movable blockers",
-                        confidence=0.42,
+                        confidence=0.55 if nav_blocked_targets > 0 else 0.42,
                         targets=targets,
-                        evidence=["large regions coexist with compact objects"],
+                        evidence=[
+                            "large regions coexist with compact objects",
+                            f"blocked target count={nav_blocked_targets}",
+                        ],
                     )
                 )
 

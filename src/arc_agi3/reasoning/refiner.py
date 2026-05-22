@@ -17,6 +17,8 @@ class HypothesisRefiner:
         coordinate_probe_count = int(notes.get("runtime_coordinate_probe_count", 0) or 0)
         scene_goals = [str(goal) for goal in notes.get("scene_goal_kinds", [])]
         scene_targets = tuple(notes.get("scene_goal_targets", []) or state.candidate_clicks[:12])
+        nav_has_path = bool(notes.get("nav_has_path", False))
+        nav_next_step_delta = notes.get("nav_next_step_delta")
         hypotheses: list[Hypothesis] = []
 
         hypotheses.extend(self._goal_conditioned_hypotheses(scene_goals, scene_targets))
@@ -49,10 +51,11 @@ class HypothesisRefiner:
             hypotheses.append(
                 Hypothesis(
                     kind=HypothesisKind.MOVEMENT_AXIS,
-                    summary=f"{strategy}: learn ACTION1-4 movement axes",
-                    confidence=0.75,
-                    uncertainty=0.25,
-                    evidence=["only simple movement-like actions are available"],
+                    summary=f"{strategy}: follow free-space path" if nav_has_path else f"{strategy}: learn ACTION1-4 movement axes",
+                    target=nav_next_step_delta,
+                    confidence=0.88 if nav_has_path else 0.75,
+                    uncertainty=0.18 if nav_has_path else 0.25,
+                    evidence=["navigation blueprint found a path"] if nav_has_path else ["only simple movement-like actions are available"],
                 )
             )
             return hypotheses
@@ -71,10 +74,11 @@ class HypothesisRefiner:
             hypotheses.append(
                 Hypothesis(
                     kind=HypothesisKind.MOVEMENT_AXIS,
-                    summary=f"{strategy}: compare movement effects before and after mode actions",
-                    confidence=0.65,
-                    uncertainty=0.35,
-                    evidence=["movement plus mode/tool action signature"],
+                    summary=f"{strategy}: follow free-space path and compare mode effects" if nav_has_path else f"{strategy}: compare movement effects before and after mode actions",
+                    target=nav_next_step_delta,
+                    confidence=0.78 if nav_has_path else 0.65,
+                    uncertainty=0.25 if nav_has_path else 0.35,
+                    evidence=["navigation blueprint found a path", "movement plus mode/tool action signature"] if nav_has_path else ["movement plus mode/tool action signature"],
                 )
             )
             return hypotheses

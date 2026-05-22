@@ -12,6 +12,7 @@ from arc_agi3.policy.refinement_controller import RefinementController
 from arc_agi3.planning.experiment_policy import ExperimentPolicy
 from arc_agi3.planning.experiment_runner import ExperimentRunner
 from arc_agi3.planning.simple_planner import SimplePlanner
+from arc_agi3.reasoning.scene_delta import GoalProgressScorer, SceneDeltaInterpreter
 
 
 class ArcAgentRuntime:
@@ -26,6 +27,8 @@ class ArcAgentRuntime:
         self.experiment_policy = ExperimentPolicy()
         self.experiment_runner = ExperimentRunner()
         self.refinement_controller = RefinementController(self.config)
+        self.scene_delta_interpreter = SceneDeltaInterpreter()
+        self.goal_progress_scorer = GoalProgressScorer()
         self.game_memory = GameMemory()
         self.graph = StateGraph()
         self.previous_observation: Observation | None = None

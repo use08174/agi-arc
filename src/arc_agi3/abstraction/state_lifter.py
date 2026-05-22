@@ -51,7 +51,7 @@ class StateLifter:
             color_histogram=color_histogram,
             width=width,
             height=height,
-            notes=dict(observation.notes),
+            notes={**dict(observation.notes), "_raw_grid": frame.grid},
         )
 
     def _connected_components(self, frame: Frame) -> Iterable[LiftedObject]:

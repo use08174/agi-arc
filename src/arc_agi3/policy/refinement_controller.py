@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from arc_agi3.abstraction.navigation_blueprint import NavigationBlueprintBuilder
 from arc_agi3.abstraction.scene_blueprint import SceneBlueprintBuilder
 from arc_agi3.abstraction.state_lifter import StateLifter
 from arc_agi3.core.config import AgentConfig
@@ -30,6 +31,7 @@ class RefinementController:
         self.config = config
         self.lifter = StateLifter()
         self.blueprints = SceneBlueprintBuilder()
+        self.navigation = NavigationBlueprintBuilder()
         self.goal_inferencer = GoalInferencer()
         self.refiner = HypothesisRefiner()
         self.critic = HypothesisCritic()
@@ -51,9 +53,12 @@ class RefinementController:
         lifted.notes.update(signature.to_notes())
         lifted.notes.update(self._probe_phase_notes(signature.action_names, recent_action_keys))
         blueprint = self.blueprints.build(lifted)
+        nav_blueprint = self.navigation.build(lifted)
+        lifted.notes.update(nav_blueprint.to_notes())
         goals = self.goal_inferencer.infer(blueprint)
         lifted.notes.update(blueprint.to_notes())
         lifted.notes.update(goals_to_notes(goals))
+        observation.notes.update(lifted.notes)
         hypotheses = self.refiner.generate(lifted)
         hypotheses = self.critic.critique(hypotheses, lifted)
         hypotheses = self.refiner.refine(hypotheses)
