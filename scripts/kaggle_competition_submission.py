@@ -74,6 +74,7 @@ def run_submission(
     competition_root: Path,
     working_root: Path,
     description: str,
+    agent_script: str,
 ) -> Path:
     official_src = competition_root / "ARC-AGI-3-Agents"
     if not official_src.exists():
@@ -82,7 +83,9 @@ def run_submission(
     if repo_dst.exists():
         shutil.rmtree(repo_dst)
     shutil.copytree(official_src, repo_dst)
-    agent_src = repo_root / "scripts" / "kaggle_offline_eval_agent.py"
+    agent_src = Path(agent_script)
+    if not agent_src.is_absolute():
+        agent_src = repo_root / agent_src
     if not agent_src.exists():
         raise FileNotFoundError(f"Agent wrapper not found: {agent_src}")
     prepare_official_repo(repo_dst, agent_src, repo_root)
@@ -141,6 +144,11 @@ def main() -> None:
         default="ARC-AGI-3-Agents-agi-arc-submission",
         help="Folder name for the writable official-repo copy.",
     )
+    parser.add_argument(
+        "--agent-script",
+        default="scripts/kaggle_offline_eval_agent.py",
+        help="Agent wrapper script to copy into the official ARC repo.",
+    )
     args = parser.parse_args()
 
     repo_root = find_repo_root(args.repo_root)
@@ -149,6 +157,7 @@ def main() -> None:
         competition_root=Path(args.competition_root),
         working_root=Path(args.working_root),
         description=args.description,
+        agent_script=args.agent_script,
     )
     print(f"submission_path={submission_path}")
 
