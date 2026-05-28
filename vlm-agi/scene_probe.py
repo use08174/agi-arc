@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any
 
-from grid import grid_to_rgb_array, is_valid_grid, latest_grid_from_raw
+from grid import frame_metadata, grid_to_rgb_array, is_valid_grid, latest_grid_from_raw
 from model import extract_json_object
 from prompts import build_compact_scene_prompt
 from session import VLMArcRunner
