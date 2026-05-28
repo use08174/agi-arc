@@ -11,18 +11,11 @@
 - `grid.py`: ARC 그리드 변환/시각화 유틸
 - `prompts.py`: scene/policy 프롬프트 빌더
 - `session.py`: ARC 세션과 multi-action 루프
-- `scene_probe.py`: 장면 이해 probe 루프
 
 ## Usage
 
 ```bash
 python vlm-agi/main.py --game-id su15 --max-steps 30
-```
-
-장면 이해 probe를 돌리려면:
-
-```bash
-python vlm-agi/main.py --scene-probe --probe-steps 5
 ```
 
 필요한 값은 환경변수로 넣습니다.

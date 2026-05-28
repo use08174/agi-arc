@@ -4,7 +4,6 @@ import argparse
 from config import AppConfig
 from model import VLMManager
 from runtime import initialize_runtime
-from scene_probe import run_scene_probe_sequence
 from session import VLMArcRunner
 
 
@@ -26,17 +25,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-display",
         action="store_true",
         help="Disable matplotlib/image display for frames",
-    )
-    parser.add_argument(
-        "--scene-probe",
-        action="store_true",
-        help="Run the scene-understanding probe loop instead of the plain episode loop",
-    )
-    parser.add_argument(
-        "--probe-steps",
-        type=int,
-        default=5,
-        help="Number of probe steps when --scene-probe is enabled",
     )
     parser.add_argument(
         "--install-pillow-fix",
@@ -84,14 +72,6 @@ def main() -> None:
     )
 
     try:
-        if args.scene_probe:
-            run_scene_probe_sequence(
-                runner,
-                steps=args.probe_steps,
-                display_after=not args.no_display,
-            )
-            return
-
         runner.run_episode(
             max_steps=config.max_steps,
             close_at_end=args.close_at_end,

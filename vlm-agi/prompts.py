@@ -45,6 +45,7 @@ First identify what changed between Image 1 and Image 2:
 The object or region that changed after the previous action is the strongest evidence for the controlled player.
 Use visual change to update your player hypothesis.
 Do not choose the next action until you have reasoned about the visual difference.
+Your main job is not just to act. Your main job is to form and test rules about the game.
 
 Controls:
 ACTION1=up
@@ -55,12 +56,30 @@ ACTION5=interact/special
 ACTION6=x,y coordinate
 ACTION7=extra
 
+Hard control semantics:
+- Treat ACTION1, ACTION2, ACTION3, ACTION4 as fixed symbolic controls.
+- Do not reinterpret them from the image.
+- ACTION1 means only up.
+- ACTION2 means only down.
+- ACTION3 means only left.
+- ACTION4 means only right.
+- Never describe ACTION4 as "right and up", "diagonal", "toward a platform", or any other composite move unless the environment response after pressing it causes that outcome.
+- Separate control input from environment response:
+  - control input = the commanded direction above
+  - environment response = how the world changed after that input
+- When comparing before/after images, describe the observed response, but do not redefine the meaning of the action itself.
+
 Do not describe the image as a character, animal, face, body, whale, fish, or creature.
 
 Return strict JSON only:
 {
   "visual_change": "what changed from Image 1 to Image 2, or 'only one image' if no previous image",
   "player_hypothesis": "which object is likely controlled and why",
+  "rule_hypotheses": [
+    {"hypothesis": "...", "confidence": "low/medium/high"}
+  ],
+  "best_experiment": "what rule this action is testing",
+  "expected_observation": "what result would support or weaken the rule hypothesis",
   "progress_assessment": "progress / no_progress / uncertain",
   "reasoning": "brief reason for the next action",
   "chosen_actions": ["ACTION1"]
@@ -137,6 +156,9 @@ def build_policy_prompt(
     prev_reasoning = session.get("last_vlm_reasoning")
     prev_visual_change = session.get("last_visual_change")
     prev_player_hypothesis = session.get("last_player_hypothesis")
+    prev_rule_hypotheses = session.get("rule_hypotheses") or []
+    prev_test_goal = session.get("last_test_goal")
+    prev_expected_observation = session.get("last_expected_observation")
     prev_action = session.get("last_action")
     prev_transition = compact_transition_for_prompt(session.get("last_transition"))
 
@@ -150,6 +172,15 @@ Previous VLM visual_change:
 
 Previous VLM player_hypothesis:
 {prev_player_hypothesis or "(none)"}
+
+Previous rule hypotheses:
+{json.dumps(prev_rule_hypotheses, ensure_ascii=False)}
+
+Previous test goal:
+{prev_test_goal or "(none)"}
+
+Previous expected observation:
+{prev_expected_observation or "(none)"}
 
 Previous reasoning:
 {prev_reasoning or "(none)"}
@@ -232,10 +263,22 @@ Rules:
 Current metadata:
 {json.dumps(current_meta, ensure_ascii=False)}
 
+Current objective:
+- Maintain a small set of explicit rule hypotheses.
+- Choose actions that distinguish between competing rule hypotheses.
+- Prefer experiments that produce informative differences, not just movement.
+- If the rule already looks stable and a repeated move is the best test, fill chosen_actions with a longer repeated sequence instead of returning only one action.
+- If a repeated move is justified, prefer emitting multiple actions at once up to the allowed budget.
+
 Return only:
 {{
   "visual_change": "...",
   "player_hypothesis": "...",
+  "rule_hypotheses": [
+    {{"hypothesis": "...", "confidence": "low/medium/high"}}
+  ],
+  "best_experiment": "...",
+  "expected_observation": "...",
   "progress_assessment": "progress / no_progress / uncertain",
   "reasoning": "...",
   "chosen_actions": []

@@ -34,6 +34,9 @@ def build_default_session_state() -> dict[str, Any]:
         "last_vlm_reasoning": None,
         "last_visual_change": None,
         "last_player_hypothesis": None,
+        "rule_hypotheses": [],
+        "last_test_goal": None,
+        "last_expected_observation": None,
         "logs": [],
         "closed": False,
         "action_queue": [],
@@ -214,6 +217,59 @@ class VLMArcRunner:
         if not str(action_text).startswith("ACTION6|"):
             return None
         return str(action_text)
+
+    @staticmethod
+    def _compact_rule_hypotheses(plan: dict[str, Any]) -> list[dict[str, str]]:
+        hypotheses = plan.get("rule_hypotheses")
+        if not isinstance(hypotheses, list):
+            return []
+        out = []
+        for item in hypotheses[:4]:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("hypothesis", "")).strip()
+            if not text:
+                continue
+            out.append(
+                {
+                    "hypothesis": text,
+                    "confidence": str(item.get("confidence", "low")).strip() or "low",
+                }
+            )
+        return out
+
+    def update_hypotheses_from_plan(self, plan: dict[str, Any]) -> None:
+        self.session["rule_hypotheses"] = self._compact_rule_hypotheses(plan)
+        self.session["last_test_goal"] = str(plan.get("best_experiment", "")).strip()
+        self.session["last_expected_observation"] = str(
+            plan.get("expected_observation", "")
+        ).strip()
+
+    def update_hypotheses_from_result(
+        self,
+        action_text: str,
+        transition: dict[str, Any],
+        test_result: str,
+    ) -> None:
+        hypotheses = list(self.session.get("rule_hypotheses", []))
+        if not hypotheses:
+            return
+
+        note = None
+        changed = transition.get("changed_cells")
+        if str(action_text).startswith("ACTION6|"):
+            if test_result in {"no_visible_effect", "invalid_frame"} or changed == 0:
+                note = "Recent evidence: this coordinate click likely has no effect or is invalid."
+            elif isinstance(changed, int) and changed > 0:
+                note = "Recent evidence: this coordinate click causes a visible local effect."
+        elif test_result == "confirmed_progress":
+            note = "Recent evidence: this action pattern appears to make real progress."
+
+        if note:
+            top = dict(hypotheses[0])
+            top["hypothesis"] = f"{top['hypothesis']} {note}".strip()
+            hypotheses[0] = top
+            self.session["rule_hypotheses"] = hypotheses[:4]
 
     def get_chosen_actions_from_parsed(
         self, parsed: dict[str, Any], raw_frame: Any, max_actions: int
@@ -456,6 +512,49 @@ class VLMArcRunner:
             )
         return "If uncertain, keep the plan short."
 
+    @staticmethod
+    def _is_simple_move(action_text: str) -> bool:
+        return action_text in {"ACTION1", "ACTION2", "ACTION3", "ACTION4"}
+
+    def maybe_expand_action_sequence(
+        self,
+        action_texts: list[str],
+        parsed: dict[str, Any],
+        max_actions: int,
+    ) -> list[str]:
+        if len(action_texts) != 1 or max_actions <= 1:
+            return action_texts
+
+        action_text = action_texts[0]
+        if not self._is_simple_move(action_text):
+            return action_texts
+
+        logs = [
+            record for record in self.session.get("logs", [])[-3:] if isinstance(record, dict)
+        ]
+        if len(logs) < 2:
+            return action_texts
+
+        recent_same_move = 0
+        for record in reversed(logs):
+            if str(record.get("action")) != action_text:
+                break
+            if str(record.get("test_result")) not in {
+                "confirmed_progress",
+                "visible_change_no_progress",
+            }:
+                break
+            recent_same_move += 1
+
+        if recent_same_move < 2:
+            return action_texts
+
+        progress = str(parsed.get("progress_assessment", "")).strip().lower()
+        if progress not in {"progress", "uncertain", ""}:
+            return action_texts
+
+        return [action_text] * max_actions
+
     def ask_vlm_for_action_sequence(
         self, raw_frame: Any
     ) -> tuple[list[str], dict[str, Any], str]:
@@ -488,8 +587,11 @@ class VLMArcRunner:
         self.session["last_player_hypothesis"] = str(
             parsed.get("player_hypothesis", "")
         ).strip()
+        self.update_hypotheses_from_plan(parsed)
         self.session["last_planned_action_budget"] = max_actions
         action_texts = self.get_chosen_actions_from_parsed(parsed, raw_frame, max_actions)
+        action_texts = self.maybe_expand_action_sequence(action_texts, parsed, max_actions)
+        parsed["chosen_actions"] = list(action_texts)
         return action_texts, parsed, raw_text
 
     def should_clear_action_queue(
@@ -598,12 +700,17 @@ class VLMArcRunner:
                 stats["blocked"] = int(stats.get("blocked", 0)) + 1
             history[action6_key] = stats
 
+        self.update_hypotheses_from_result(action_text, transition, test_result)
+
         record = {
             "step": len(self.session["logs"]),
             "action": action_text,
             "vlm_called": vlm_called,
             "planned_action_budget": self.session.get("last_planned_action_budget"),
             "plan": plan,
+            "rule_hypotheses": list(self.session.get("rule_hypotheses", [])),
+            "test_goal": self.session.get("last_test_goal"),
+            "expected_observation": self.session.get("last_expected_observation"),
             "planned_actions": plan.get("chosen_actions") if isinstance(plan, dict) else None,
             "queue_before": queue_before,
             "queue_after": list(self.session.get("action_queue", [])),
@@ -613,7 +720,6 @@ class VLMArcRunner:
             "before_meta": frame_metadata(raw, game_id=self.config.game_id),
             "after_meta": frame_metadata(after_raw, game_id=self.config.game_id),
             "raw_vlm_output": raw_vlm_output if vlm_called else "",
-            "test_goal": plan.get("test_goal") if isinstance(plan, dict) else None,
             "test_result": test_result,
         }
 
@@ -627,7 +733,10 @@ class VLMArcRunner:
             handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
         reasoning = plan.get("reasoning") if isinstance(plan, dict) else ""
+        test_goal = self.session.get("last_test_goal") or ""
         print(f"[step {record['step']}]")
+        if test_goal:
+            print(f"test: {test_goal}")
         if reasoning:
             print(reasoning)
         print(f"action: {action_text}")
