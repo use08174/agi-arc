@@ -75,6 +75,24 @@ class MyAgent(Agent):
         )
         self.runner = VLMArcRunner(config, VLMManager(config))
         self.awaiting_fresh_episode = True
+        self.fail_fast = os.getenv("ARC_VLM_FAIL_FAST", "1") == "1"
+        self.max_fallbacks = int(os.getenv("ARC_VLM_MAX_FALLBACKS", "0"))
+        self.fallback_count = 0
+
+    def _handle_vlm_failure(
+        self,
+        exc: Exception,
+        latest_frame: FrameData,
+    ) -> tuple[list[str], dict[str, Any]]:
+        self.fallback_count += 1
+        message = f"VLM planning failed (count={self.fallback_count}): {repr(exc)}"
+        if self.fail_fast and self.fallback_count > self.max_fallbacks:
+            raise RuntimeError(message) from exc
+        fallback = self.runner.fallback_action(latest_frame)
+        return [fallback], {
+            "reasoning": f"fallback due to error: {repr(exc)}",
+            "chosen_actions": [fallback],
+        }
 
     def is_done(self, frames: list[FrameData], latest_frame: FrameData) -> bool:
         return latest_frame.state is GameState.WIN
@@ -129,12 +147,7 @@ class MyAgent(Agent):
             try:
                 action_texts, plan, _ = self.runner.ask_vlm_for_action_sequence(latest_frame)
             except Exception as exc:
-                fallback = self.runner.fallback_action(latest_frame)
-                action_texts = [fallback]
-                plan = {
-                    "reasoning": f"fallback due to error: {repr(exc)}",
-                    "chosen_actions": [fallback],
-                }
+                action_texts, plan = self._handle_vlm_failure(exc, latest_frame)
             self.runner.session["action_queue"] = list(action_texts)
             self.runner.session["current_plan"] = plan
 
