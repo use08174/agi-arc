@@ -73,8 +73,8 @@ class AppConfig:
                 "ARC_VLM_SUMMARY_PATH", "/kaggle/working/vlm_policy_summary.json"
             ),
             max_steps=int(os.getenv("ARC_VLM_MAX_STEPS", "30")),
-            max_new_tokens=int(os.getenv("ARC_VLM_MAX_NEW_TOKENS", "384")),
-            image_scale=int(os.getenv("ARC_VLM_IMAGE_SCALE", "6")),
+            max_new_tokens=int(os.getenv("ARC_VLM_MAX_NEW_TOKENS", "192")),
+            image_scale=int(os.getenv("ARC_VLM_IMAGE_SCALE", "4")),
             draw_grid=os.getenv("ARC_VLM_DRAW_GRID", "1") == "1",
             print_vlm_output=os.getenv("ARC_VLM_PRINT_OUTPUT", "1") == "1",
             allow_download=os.getenv("ALLOW_MODEL_DOWNLOAD", "0") == "1",
@@ -92,7 +92,7 @@ class AppConfig:
                 os.getenv("ARC_VLM_MAX_ACTIONS_PER_CALL", "10")
             ),
             adaptive_action_planning=os.getenv("ARC_VLM_ADAPTIVE_ACTIONS", "1") == "1",
-            gpu_memory_limit_gb=int(os.getenv("ARC_VLM_GPU_MEMORY_LIMIT_GB", "11")),
+            gpu_memory_limit_gb=int(os.getenv("ARC_VLM_GPU_MEMORY_LIMIT_GB", "0")),
             repo_root=repo_root,
             in_kaggle=in_kaggle,
         )
