@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import re
 import shutil
@@ -201,6 +202,62 @@ class VLMManager:
             out[key] = value.to(device) if hasattr(value, "to") else value
         return out
 
+    @staticmethod
+    def _is_oom_error(exc: Exception) -> bool:
+        if isinstance(exc, torch.OutOfMemoryError):
+            return True
+        return "out of memory" in str(exc).lower()
+
+    @staticmethod
+    def _release_cuda_memory() -> None:
+        gc.collect()
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _downscale_image(image: Any, factor: int) -> Any:
+        if factor <= 1:
+            return image
+        if hasattr(image, "copy") and hasattr(image, "shape"):
+            return image[::factor, ::factor].copy()
+        return image
+
+    def _fallback_generation_attempts(
+        self,
+        images: list[Any],
+        max_tokens: int,
+    ) -> list[tuple[str, list[Any], int]]:
+        attempts: list[tuple[str, list[Any], int]] = [("default", images, max_tokens)]
+        if images:
+            attempts.append(
+                (
+                    "downscaled_x2",
+                    [self._downscale_image(image, 2) for image in images],
+                    min(max_tokens, 256),
+                )
+            )
+        if len(images) >= 2:
+            attempts.append(
+                (
+                    "last_image_only",
+                    [self._downscale_image(images[-1], 2)],
+                    min(max_tokens, 192),
+                )
+            )
+        elif images:
+            attempts.append(
+                (
+                    "single_image_smaller",
+                    [self._downscale_image(images[0], 3)],
+                    min(max_tokens, 192),
+                )
+            )
+        return attempts
+
     def prepare_inputs(self, images: list[Any], prompt: str, *, processor: Any | None = None) -> dict[str, Any]:
         if processor is None:
             processor, _ = self.get()
@@ -227,22 +284,45 @@ class VLMManager:
         max_new_tokens: int | None = None,
     ) -> str:
         processor, model = self.get()
-        inputs = self.prepare_inputs(images, prompt, processor=processor)
-        inputs = self.move_inputs_to_device(inputs, self.model_device(model))
         max_tokens = int(max_new_tokens or self.config.max_new_tokens)
-        with torch.inference_mode():
-            generated_ids = model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                do_sample=False,
-            )
-        input_len = inputs["input_ids"].shape[-1]
-        generated_ids = generated_ids[:, input_len:]
-        return processor.batch_decode(
-            generated_ids,
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
-        )[0].strip()
+        attempts = self._fallback_generation_attempts(images, max_tokens)
+        last_exc: Exception | None = None
+
+        for label, attempt_images, attempt_tokens in attempts:
+            try:
+                inputs = self.prepare_inputs(attempt_images, prompt, processor=processor)
+                inputs = self.move_inputs_to_device(inputs, self.model_device(model))
+                with torch.inference_mode():
+                    generated_ids = model.generate(
+                        **inputs,
+                        max_new_tokens=attempt_tokens,
+                        do_sample=False,
+                    )
+                input_len = inputs["input_ids"].shape[-1]
+                generated_ids = generated_ids[:, input_len:]
+                if label != "default":
+                    print(
+                        f"VLM retry succeeded with {label}: "
+                        f"images={len(attempt_images)} max_new_tokens={attempt_tokens}"
+                    )
+                return processor.batch_decode(
+                    generated_ids,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=False,
+                )[0].strip()
+            except Exception as exc:
+                last_exc = exc
+                if not self._is_oom_error(exc):
+                    raise
+                self._release_cuda_memory()
+                print(
+                    f"VLM OOM on {label}; retrying with smaller inputs "
+                    f"(images={len(attempt_images)} max_new_tokens={attempt_tokens})"
+                )
+                continue
+
+        assert last_exc is not None
+        raise last_exc
 
     def generate_scene_understanding(
         self,
