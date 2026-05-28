@@ -28,6 +28,8 @@ class AppConfig:
     stop_sequence_on_no_change: bool
     stop_sequence_on_level_change: bool
     stop_sequence_on_actions_change: bool
+    action6_max_candidates: int
+    action6_grid_points_per_axis: int
     repo_root: Path
     in_kaggle: bool
 
@@ -79,6 +81,10 @@ class AppConfig:
             stop_sequence_on_no_change=True,
             stop_sequence_on_level_change=True,
             stop_sequence_on_actions_change=True,
+            action6_max_candidates=int(os.getenv("ARC_VLM_ACTION6_MAX_CANDIDATES", "12")),
+            action6_grid_points_per_axis=int(
+                os.getenv("ARC_VLM_ACTION6_GRID_POINTS_PER_AXIS", "3")
+            ),
             repo_root=repo_root,
             in_kaggle=in_kaggle,
         )

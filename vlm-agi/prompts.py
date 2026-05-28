@@ -127,6 +127,8 @@ def build_policy_prompt(
     meta: dict[str, Any],
     session: dict[str, Any],
     config: AppConfig,
+    *,
+    action6_candidates: list[dict[str, Any]] | None = None,
 ) -> str:
     current_available = list(meta.get("available_actions", []))
     prev_reasoning = session.get("last_vlm_reasoning")
@@ -170,9 +172,21 @@ Infer the player and goal from the current image.
         "levels_completed": meta.get("levels_completed"),
         "available_actions": meta.get("available_actions"),
     }
+    action6_text = ""
+    if action6_candidates:
+        action6_text = f"""
+
+ACTION6 coordinate candidates:
+{json.dumps(action6_candidates, ensure_ascii=False)}
+
+ACTION6 rule:
+- If you choose ACTION6, you must output one of the exact candidate strings from action6_candidates.
+- Do not output bare ACTION6.
+""".rstrip()
     return f"""
 Available actions:
 {json.dumps(current_available, ensure_ascii=False)}
+{action6_text}
 
 {previous_context}
 
@@ -186,7 +200,8 @@ Rules:
 - Return strict JSON only.
 - chosen_actions must be a list.
 - Output 1 to {config.actions_per_vlm_call} actions.
-- Every action must be exactly one of Available actions.
+- Every non-ACTION6 action must be exactly one of Available actions.
+- If ACTION6 is used, it must include x and y in the exact candidate string format.
 - Do not choose an action before comparing the images when two images are provided.
 - Do not rely only on object appearance to decide the player.
 - Prefer the object/region that changed after the previous action as the player.

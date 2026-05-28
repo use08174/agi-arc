@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from grid import frame_metadata, grid_to_rgb_array, latest_grid_from_raw
+from grid import frame_metadata, grid_to_rgb_array, is_valid_grid, latest_grid_from_raw
 from model import extract_json_object
 from prompts import build_compact_scene_prompt
 from session import VLMArcRunner
@@ -28,11 +28,6 @@ def run_scene_understanding_probe(
     raw_frame = runner.session["raw"]
     grid = latest_grid_from_raw(raw_frame)
     meta = frame_metadata(raw_frame, game_id=runner.config.game_id)
-    current_image = grid_to_rgb_array(
-        grid,
-        scale=runner.config.image_scale,
-        draw_grid=False,
-    )
 
     print("=" * 100)
     print(f"SCENE PROBE: {label}")
@@ -47,6 +42,15 @@ def run_scene_understanding_probe(
             ensure_ascii=False,
             indent=2,
         )
+    )
+    if not is_valid_grid(grid):
+        print("Skipping scene probe because the current frame grid is empty or invalid.")
+        return None
+
+    current_image = grid_to_rgb_array(
+        grid,
+        scale=runner.config.image_scale,
+        draw_grid=False,
     )
     if display_image:
         maybe_display_image(current_image)
@@ -89,6 +93,9 @@ def run_scene_probe_sequence(
         )
         results.append({"step": index + 1, "record": record, "analysis": analysis})
         meta = frame_metadata(runner.session["raw"], game_id=runner.config.game_id)
+        if analysis is None:
+            print("Stopping because the current frame is invalid after the last action.")
+            break
         if meta.get("state") != "NOT_FINISHED":
             print(f"Stopping because state changed: {meta.get('state')}")
             break

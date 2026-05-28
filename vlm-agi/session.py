@@ -10,7 +10,9 @@ import numpy as np
 
 from config import AppConfig
 from grid import (
+    action6_candidates,
     available_action_names,
+    is_valid_grid,
     display_grid,
     frame_metadata,
     grid_to_rgb_array,
@@ -37,6 +39,7 @@ def build_default_session_state() -> dict[str, Any]:
         "closed": False,
         "action_queue": [],
         "current_plan": None,
+        "last_action6_candidates": [],
     }
 
 
@@ -151,7 +154,19 @@ class VLMArcRunner:
         if name not in allowed:
             raise ValueError(f"{name} not in available_actions={allowed}")
 
+        if name == "ACTION6" and not payload_text:
+            raise ValueError("ACTION6 requires x,y payload")
+
         if name == "ACTION6" and payload_text:
+            allowed_candidates = {
+                item["action_text"]
+                for item in self.session.get("last_action6_candidates", [])
+                if isinstance(item, dict) and item.get("action_text")
+            }
+            if allowed_candidates and action_text not in allowed_candidates:
+                raise ValueError(
+                    f"ACTION6 must use one of the suggested candidates: {sorted(allowed_candidates)}"
+                )
             arr = np.asarray(latest_grid_from_raw(raw_frame))
             h, w = arr.shape[:2]
             parts = {}
@@ -263,6 +278,13 @@ class VLMArcRunner:
         allowed = available_action_names(raw_frame)
         if not allowed:
             raise ValueError("no available actions")
+        if allowed == ["ACTION6"] or (len(allowed) == 1 and "ACTION6" in allowed):
+            candidates = self.build_action6_candidates(raw_frame)
+            if candidates:
+                return candidates[0]["action_text"]
+        non_coordinate = [action for action in allowed if action != "ACTION6"]
+        if non_coordinate:
+            allowed = non_coordinate
         recent = [
             record.get("action")
             for record in self.session.get("logs", [])[-6:]
@@ -291,12 +313,50 @@ class VLMArcRunner:
             return [prev_image, current_image]
         return [current_image]
 
+    def build_action6_candidates(self, raw_frame: Any) -> list[dict[str, Any]]:
+        candidates = []
+        current_grid = latest_grid_from_raw(raw_frame)
+        candidates.extend(
+            action6_candidates(
+                current_grid,
+                max_candidates=self.config.action6_max_candidates,
+                grid_points_per_axis=self.config.action6_grid_points_per_axis,
+            )
+        )
+
+        transition = self.session.get("last_transition")
+        bbox = transition.get("changed_bbox") if isinstance(transition, dict) else None
+        if isinstance(bbox, dict):
+            x = int(round((bbox["x_min"] + bbox["x_max"]) / 2))
+            y = int(round((bbox["y_min"] + bbox["y_max"]) / 2))
+            changed_region = {
+                "x": x,
+                "y": y,
+                "action_text": f"ACTION6|x={x},y={y}",
+                "source": "changed_region",
+                "detail": "center_of_previous_change",
+            }
+            existing = {item["action_text"] for item in candidates}
+            if changed_region["action_text"] not in existing:
+                candidates.insert(0, changed_region)
+
+        self.session["last_action6_candidates"] = candidates[: self.config.action6_max_candidates]
+        return self.session["last_action6_candidates"]
+
     def ask_vlm_for_action_sequence(
         self, raw_frame: Any
     ) -> tuple[list[str], dict[str, Any], str]:
         images = self.images_for_current_query(raw_frame)
         meta = frame_metadata(raw_frame, game_id=self.config.game_id)
-        prompt = build_policy_prompt(meta, self.session, self.config)
+        candidates = []
+        if "ACTION6" in meta.get("available_actions", []):
+            candidates = self.build_action6_candidates(raw_frame)
+        prompt = build_policy_prompt(
+            meta,
+            self.session,
+            self.config,
+            action6_candidates=candidates,
+        )
         raw_text = self.vlm.generate_local_vlm(
             images=images,
             prompt=prompt,
@@ -319,10 +379,17 @@ class VLMArcRunner:
     ) -> tuple[bool, str]:
         old_levels = getattr(raw_before, "levels_completed", None)
         new_levels = getattr(raw_after, "levels_completed", None)
-        if self.config.stop_sequence_on_level_change and old_levels != new_levels:
+        if (
+            self.config.stop_sequence_on_level_change
+            and old_levels is not None
+            and new_levels is not None
+            and old_levels != new_levels
+        ):
             return True, "levels_completed changed"
         if self.config.stop_sequence_on_no_change and transition.get("changed_cells") == 0:
             return True, "no visible change"
+        if not is_valid_grid(latest_grid_from_raw(raw_after)):
+            return True, "invalid frame after action"
         if self.config.stop_sequence_on_actions_change:
             if available_action_names(raw_before) != available_action_names(raw_after):
                 return True, "available_actions changed"
@@ -334,10 +401,12 @@ class VLMArcRunner:
         raw_after: Any,
         transition: dict[str, Any],
     ) -> str:
-        if getattr(raw_before, "levels_completed", None) != getattr(
-            raw_after, "levels_completed", None
-        ):
+        old_levels = getattr(raw_before, "levels_completed", None)
+        new_levels = getattr(raw_after, "levels_completed", None)
+        if old_levels is not None and new_levels is not None and old_levels != new_levels:
             return "confirmed_progress"
+        if not is_valid_grid(latest_grid_from_raw(raw_after)):
+            return "invalid_frame"
         if transition.get("changed_cells") == 0:
             return "no_visible_effect"
         if transition.get("changed_cells") <= 2:

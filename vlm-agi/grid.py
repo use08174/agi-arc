@@ -44,6 +44,11 @@ def latest_grid_from_raw(raw_frame: Any) -> list[list[int]]:
     return as_list_grid(frames[-1]) if frames else []
 
 
+def is_valid_grid(grid: Any) -> bool:
+    arr = np.asarray(as_list_grid(grid), dtype=np.int64)
+    return arr.ndim == 2 and arr.size > 0
+
+
 def grid_to_rgb_array(
     grid: Any,
     *,
@@ -134,6 +139,69 @@ def summarize_objects(grid: Any, max_objects: int = 10) -> list[dict[str, Any]]:
 
     objects.sort(key=lambda obj: obj["cell_count"], reverse=True)
     return objects[:max_objects]
+
+
+def action6_candidates(
+    grid: Any,
+    *,
+    max_candidates: int = 12,
+    grid_points_per_axis: int = 3,
+) -> list[dict[str, Any]]:
+    arr = np.asarray(as_list_grid(grid), dtype=int)
+    if arr.ndim != 2 or arr.size == 0:
+        return []
+
+    height, width = arr.shape
+    objects = summarize_objects(grid, max_objects=max_candidates * 2)
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[int, int]] = set()
+
+    def add_point(x: int, y: int, source: str, detail: str) -> None:
+        if not (0 <= x < width and 0 <= y < height):
+            return
+        point = (int(x), int(y))
+        if point in seen:
+            return
+        seen.add(point)
+        candidates.append(
+            {
+                "x": point[0],
+                "y": point[1],
+                "action_text": f"ACTION6|x={point[0]},y={point[1]}",
+                "source": source,
+                "detail": detail,
+            }
+        )
+
+    for obj in objects:
+        bbox = obj["bbox"]
+        cx = int(round(obj["center"]["x"]))
+        cy = int(round(obj["center"]["y"]))
+        add_point(cx, cy, "object_center", f"color={obj['color_id']} cells={obj['cell_count']}")
+        add_point(bbox["x_min"], bbox["y_min"], "object_corner", "top_left")
+        add_point(bbox["x_max"], bbox["y_max"], "object_corner", "bottom_right")
+
+    add_point(width // 2, height // 2, "grid_center", "screen_center")
+
+    xs = _linspace_indices(width, grid_points_per_axis)
+    ys = _linspace_indices(height, grid_points_per_axis)
+    for y in ys:
+        for x in xs:
+            add_point(x, y, "grid_probe", "uniform_probe")
+
+    return candidates[:max_candidates]
+
+
+def _linspace_indices(size: int, steps: int) -> list[int]:
+    if steps <= 1:
+        return [max(0, size // 2)]
+    max_index = max(0, size - 1)
+    return sorted(
+        {
+            min(max_index, round(idx * max_index / (steps - 1)))
+            for idx in range(steps)
+        }
+    )
 
 
 def display_grid(grid: Any, *, scale: int = 6, title: str | None = None) -> None:
