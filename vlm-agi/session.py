@@ -93,7 +93,14 @@ class VLMArcRunner:
             f"{self.config.arc_base_url.rstrip('/')}/scorecards/{scorecard_id}",
         )
         print("initial_meta:")
-        pprint(frame_metadata(raw, game_id=self.config.game_id))
+        print(
+            json.dumps(
+                frame_metadata(raw, game_id=self.config.game_id),
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+        )
         if display_initial:
             display_grid(latest_grid_from_raw(raw), title="initial frame")
         return self.session
@@ -128,7 +135,7 @@ class VLMArcRunner:
                 encoding="utf-8",
             )
             print("wrote summary:", self.config.summary_path)
-            pprint(summary)
+            print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
         return summary
 
     @staticmethod
