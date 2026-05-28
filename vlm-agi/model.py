@@ -175,6 +175,8 @@ class VLMManager:
                 }
 
         model = Qwen3VLForConditionalGeneration.from_pretrained(str(model_path), **kwargs)
+        if torch.cuda.is_available() and "device_map" not in kwargs:
+            model.to("cuda")
         model.eval()
 
         self.processor = processor
