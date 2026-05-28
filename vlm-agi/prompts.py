@@ -129,7 +129,9 @@ def build_policy_prompt(
     config: AppConfig,
     *,
     action6_candidates: list[dict[str, Any]] | None = None,
+    max_actions: int | None = None,
 ) -> str:
+    planned_actions = int(max_actions or config.actions_per_vlm_call)
     current_available = list(meta.get("available_actions", []))
     prev_reasoning = session.get("last_vlm_reasoning")
     prev_visual_change = session.get("last_visual_change")
@@ -199,7 +201,7 @@ Image task:
 Rules:
 - Return strict JSON only.
 - chosen_actions must be a list.
-- Output 1 to {config.actions_per_vlm_call} actions.
+- Output 1 to {planned_actions} actions.
 - Every non-ACTION6 action must be exactly one of Available actions.
 - If ACTION6 is used, it must include x and y in the exact candidate string format.
 - Do not choose an action before comparing the images when two images are provided.

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
-
 from config import AppConfig
 from model import VLMManager
 from runtime import initialize_runtime
@@ -50,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip installing arc-agi wheels during startup",
     )
+    parser.add_argument(
+        "--keep-scorecard-open",
+        action="store_true",
+        help="Do not auto-close the scorecard at process exit",
+    )
     return parser
 
 
@@ -76,22 +79,28 @@ def main() -> None:
     vlm = VLMManager(config)
     runner = VLMArcRunner(config, vlm)
     runner.start_arc_session(display_initial=not args.no_display)
+    should_auto_close = (
+        not args.keep_scorecard_open and config.arc_mode.lower() in {"online", "competition"}
+    )
 
-    if args.scene_probe:
-        results = run_scene_probe_sequence(
-            runner,
-            steps=args.probe_steps,
+    try:
+        if args.scene_probe:
+            run_scene_probe_sequence(
+                runner,
+                steps=args.probe_steps,
+                display_after=not args.no_display,
+            )
+            return
+
+        runner.run_episode(
+            max_steps=config.max_steps,
+            close_at_end=args.close_at_end,
             display_after=not args.no_display,
         )
-        print(json.dumps(results, ensure_ascii=False, indent=2, default=str))
-        return
-
-    logs = runner.run_episode(
-        max_steps=config.max_steps,
-        close_at_end=args.close_at_end,
-        display_after=not args.no_display,
-    )
-    print(json.dumps(logs[-3:], ensure_ascii=False, indent=2, default=str))
+    finally:
+        if should_auto_close and not runner.session.get("closed"):
+            print("closing scorecard...")
+            runner.close_scorecard()
 
 
 if __name__ == "__main__":

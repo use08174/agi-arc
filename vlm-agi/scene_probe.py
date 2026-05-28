@@ -1,9 +1,7 @@
 from __future__ import annotations
-
-import json
 from typing import Any
 
-from grid import frame_metadata, grid_to_rgb_array, is_valid_grid, latest_grid_from_raw
+from grid import grid_to_rgb_array, is_valid_grid, latest_grid_from_raw
 from model import extract_json_object
 from prompts import build_compact_scene_prompt
 from session import VLMArcRunner
@@ -27,22 +25,8 @@ def run_scene_understanding_probe(
 ) -> dict[str, Any] | None:
     raw_frame = runner.session["raw"]
     grid = latest_grid_from_raw(raw_frame)
-    meta = frame_metadata(raw_frame, game_id=runner.config.game_id)
 
-    print("=" * 100)
-    print(f"SCENE PROBE: {label}")
-    print("metadata:")
-    print(
-        json.dumps(
-            {
-                "state": meta.get("state"),
-                "levels_completed": meta.get("levels_completed"),
-                "available_actions": meta.get("available_actions"),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
+    print(f"[scene {label}]")
     if not is_valid_grid(grid):
         print("Skipping scene probe because the current frame grid is empty or invalid.")
         return None
@@ -60,13 +44,11 @@ def run_scene_understanding_probe(
         prompt=build_compact_scene_prompt(raw_frame, runner.config),
         max_new_tokens=500,
     )
-    print("RAW VLM OUTPUT:")
-    print(raw_scene_text)
-
     try:
         parsed = extract_json_object(raw_scene_text)
-        print("\nPARSED JSON:")
-        print(json.dumps(parsed, ensure_ascii=False, indent=2))
+        summary = parsed.get("game_objective_hypothesis") or parsed.get("player", {}).get("why")
+        if summary:
+            print(summary)
         return parsed
     except Exception as exc:
         print("\nFailed to parse JSON:", repr(exc))
@@ -82,12 +64,7 @@ def run_scene_probe_sequence(
     results = [{"step": "initial", "analysis": run_scene_understanding_probe(runner, label="initial")}]
 
     for index in range(steps):
-        print("\n" + "#" * 100)
-        print(f"RUNNING step_once #{index + 1}")
-        print("#" * 100)
         record = runner.step_once(display_after=display_after)
-        print("ACTION RECORD:")
-        print(json.dumps(record, ensure_ascii=False, indent=2, default=str))
         analysis = run_scene_understanding_probe(
             runner, label=f"after step_once #{index + 1}"
         )
@@ -100,5 +77,5 @@ def run_scene_probe_sequence(
             print(f"Stopping because state changed: {meta.get('state')}")
             break
 
-    print("\nDONE. scene_probe_results contains all analyses.")
+    print("scene probe done")
     return results

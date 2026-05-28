@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from pprint import pprint
 from typing import Any
 
 import numpy as np
@@ -40,6 +39,7 @@ def build_default_session_state() -> dict[str, Any]:
         "action_queue": [],
         "current_plan": None,
         "last_action6_candidates": [],
+        "last_planned_action_budget": None,
     }
 
 
@@ -202,7 +202,7 @@ class VLMArcRunner:
         return GameAction.from_name(name), payload
 
     def get_chosen_actions_from_parsed(
-        self, parsed: dict[str, Any], raw_frame: Any
+        self, parsed: dict[str, Any], raw_frame: Any, max_actions: int
     ) -> list[str]:
         if not isinstance(parsed, dict):
             raise ValueError(f"parsed output is not dict: {parsed}")
@@ -221,7 +221,7 @@ class VLMArcRunner:
 
         clean = []
         for action in actions:
-            if len(clean) >= self.config.actions_per_vlm_call:
+            if len(clean) >= max_actions:
                 break
             clean.append(self.validate_action_text(action, raw_frame))
         if not clean:
@@ -343,11 +343,86 @@ class VLMArcRunner:
         self.session["last_action6_candidates"] = candidates[: self.config.action6_max_candidates]
         return self.session["last_action6_candidates"]
 
+    def adaptive_action_budget(self, raw_frame: Any) -> int:
+        if not self.config.adaptive_action_planning:
+            return self.config.actions_per_vlm_call
+
+        max_budget = max(1, self.config.max_actions_per_vlm_call)
+        base_budget = max(1, min(self.config.actions_per_vlm_call, max_budget))
+        logs = [record for record in self.session.get("logs", [])[-3:] if isinstance(record, dict)]
+        if not logs:
+            return 1
+
+        strengths = []
+        recent_action6 = 0
+        recent_non_action6 = 0
+        repeated_same_action = True
+        prev_action = None
+        for record in logs:
+            action_name = str(record.get("action", ""))
+            transition = record.get("transition_numeric") or {}
+            changed = transition.get("changed_cells")
+            if isinstance(changed, int):
+                strengths.append(changed)
+            if action_name.startswith("ACTION6"):
+                recent_action6 += 1
+            else:
+                recent_non_action6 += 1
+            if prev_action is None:
+                prev_action = action_name
+            elif action_name != prev_action:
+                repeated_same_action = False
+
+        avg_change = sum(strengths) / len(strengths) if strengths else 0.0
+        latest_result = str(logs[-1].get("test_result", ""))
+        latest_transition = logs[-1].get("transition_numeric") or {}
+        latest_changed = latest_transition.get("changed_cells")
+        available = available_action_names(raw_frame)
+        only_coordinate = bool(available) and set(available) == {"ACTION6"}
+
+        if latest_result in {"invalid_frame", "no_visible_effect"}:
+            return 1
+        if isinstance(latest_changed, int) and latest_changed == 0:
+            return 1
+        if latest_result == "weak_or_blocked_effect":
+            return 1 if recent_action6 else min(2, base_budget)
+        if latest_result == "confirmed_progress":
+            if repeated_same_action and recent_non_action6:
+                return min(max_budget, 10)
+            return min(max_budget, 5)
+        if isinstance(latest_changed, int) and latest_changed >= 6:
+            if repeated_same_action and recent_non_action6:
+                return min(max_budget, 10)
+            return min(max_budget, 5)
+        if avg_change >= 3:
+            return min(max_budget, 3 if recent_action6 or only_coordinate else 5)
+        return 1 if recent_action6 or only_coordinate else base_budget
+
+    @staticmethod
+    def plan_intent_for_budget(
+        max_actions: int,
+        available_actions: list[str],
+    ) -> str:
+        if max_actions >= 8:
+            return (
+                "You have strong evidence. Prefer a long, consistent action sequence that can repeat a known-good move."
+            )
+        if max_actions >= 5:
+            return (
+                "You have some evidence. Prefer a short multi-step plan if the same hypothesis still looks valid."
+            )
+        if "ACTION6" in available_actions:
+            return (
+                "Treat ACTION6 as a probe unless visual evidence is strong. Prefer 1 precise coordinate test before committing to a longer plan."
+            )
+        return "If uncertain, keep the plan short."
+
     def ask_vlm_for_action_sequence(
         self, raw_frame: Any
     ) -> tuple[list[str], dict[str, Any], str]:
         images = self.images_for_current_query(raw_frame)
         meta = frame_metadata(raw_frame, game_id=self.config.game_id)
+        max_actions = self.adaptive_action_budget(raw_frame)
         candidates = []
         if "ACTION6" in meta.get("available_actions", []):
             candidates = self.build_action6_candidates(raw_frame)
@@ -356,22 +431,24 @@ class VLMArcRunner:
             self.session,
             self.config,
             action6_candidates=candidates,
+            max_actions=max_actions,
+        )
+        prompt += "\n\nPlanning guidance:\n" + self.plan_intent_for_budget(
+            max_actions, meta.get("available_actions", [])
         )
         raw_text = self.vlm.generate_local_vlm(
             images=images,
             prompt=prompt,
             max_new_tokens=self.config.max_new_tokens,
         )
-        if self.config.print_vlm_output:
-            print("RAW VLM OUTPUT:")
-            print(raw_text)
         parsed = extract_json_object(raw_text)
         self.session["last_vlm_reasoning"] = str(parsed.get("reasoning", "")).strip()
         self.session["last_visual_change"] = str(parsed.get("visual_change", "")).strip()
         self.session["last_player_hypothesis"] = str(
             parsed.get("player_hypothesis", "")
         ).strip()
-        action_texts = self.get_chosen_actions_from_parsed(parsed, raw_frame)
+        self.session["last_planned_action_budget"] = max_actions
+        action_texts = self.get_chosen_actions_from_parsed(parsed, raw_frame, max_actions)
         return action_texts, parsed, raw_text
 
     def should_clear_action_queue(
@@ -465,6 +542,7 @@ class VLMArcRunner:
             "step": len(self.session["logs"]),
             "action": action_text,
             "vlm_called": vlm_called,
+            "planned_action_budget": self.session.get("last_planned_action_budget"),
             "plan": plan,
             "planned_actions": plan.get("chosen_actions") if isinstance(plan, dict) else None,
             "queue_before": queue_before,
@@ -488,17 +566,11 @@ class VLMArcRunner:
         with Path(self.config.log_path).open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
-        print("=" * 80)
-        print("step:", record["step"])
-        print("vlm_called:", vlm_called)
-        print("action:", action_text)
-        print("planned_actions:", record["planned_actions"])
-        print("queue_after:", record["queue_after"])
-        if clear_queue:
-            print("queue_cleared:", clear_reason)
-        print("reasoning:", plan.get("reasoning") if isinstance(plan, dict) else None)
-        print("numeric transition:")
-        pprint(transition)
+        reasoning = plan.get("reasoning") if isinstance(plan, dict) else ""
+        print(f"[step {record['step']}]")
+        if reasoning:
+            print(reasoning)
+        print(f"action: {action_text}")
         if display_after:
             display_grid(after_grid, title=f"after {action_text}")
         return record
@@ -528,8 +600,7 @@ class VLMArcRunner:
                 print("terminal state reached")
                 break
 
-        print("wrote logs:", self.config.log_path)
-        print("remaining action_queue:", self.session.get("action_queue", []))
+        print(f"logs: {self.config.log_path}")
         if close_at_end:
             self.close_scorecard()
         return logs
