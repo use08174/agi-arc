@@ -40,6 +40,7 @@ def build_default_session_state() -> dict[str, Any]:
         "current_plan": None,
         "last_action6_candidates": [],
         "last_planned_action_budget": None,
+        "action6_history": {},
     }
 
 
@@ -208,6 +209,12 @@ class VLMArcRunner:
             payload[key.strip()] = int(value)
         return GameAction.from_name(name), payload
 
+    @staticmethod
+    def action6_key(action_text: str) -> str | None:
+        if not str(action_text).startswith("ACTION6|"):
+            return None
+        return str(action_text)
+
     def get_chosen_actions_from_parsed(
         self, parsed: dict[str, Any], raw_frame: Any, max_actions: int
     ) -> list[str]:
@@ -347,7 +354,32 @@ class VLMArcRunner:
             if changed_region["action_text"] not in existing:
                 candidates.insert(0, changed_region)
 
-        self.session["last_action6_candidates"] = candidates[: self.config.action6_max_candidates]
+        history = self.session.get("action6_history", {})
+        filtered = []
+        for candidate in candidates:
+            key = candidate["action_text"]
+            stats = history.get(key, {})
+            if stats.get("blocked", 0) >= 2 or stats.get("no_effect", 0) >= 2:
+                continue
+            score = 0
+            score += 100 * int(stats.get("confirmed", 0))
+            score += 10 * int(stats.get("visible", 0))
+            score += 3 * int(stats.get("weak", 0))
+            score -= 25 * int(stats.get("blocked", 0))
+            score -= 15 * int(stats.get("no_effect", 0))
+            score -= 8 * int(stats.get("tries", 0))
+            enriched = dict(candidate)
+            enriched["score"] = score
+            filtered.append(enriched)
+
+        filtered.sort(
+            key=lambda item: (
+                -int(item.get("score", 0)),
+                item.get("source") != "changed_region",
+                item.get("source") != "object_center",
+            )
+        )
+        self.session["last_action6_candidates"] = filtered[: self.config.action6_max_candidates]
         return self.session["last_action6_candidates"]
 
     def adaptive_action_budget(self, raw_frame: Any) -> int:
@@ -439,10 +471,12 @@ class VLMArcRunner:
             self.config,
             action6_candidates=candidates,
             max_actions=max_actions,
+            image_count=len(images),
         )
         prompt += "\n\nPlanning guidance:\n" + self.plan_intent_for_budget(
             max_actions, meta.get("available_actions", [])
         )
+        print(f"[vlm] images={len(images)} max_actions={max_actions}")
         raw_text = self.vlm.generate_local_vlm(
             images=images,
             prompt=prompt,
@@ -544,6 +578,25 @@ class VLMArcRunner:
         )
         if clear_queue:
             self.session["action_queue"] = []
+
+        action6_key = self.action6_key(action_text)
+        if action6_key is not None:
+            history = self.session.setdefault("action6_history", {})
+            stats = dict(history.get(action6_key, {}))
+            stats["tries"] = int(stats.get("tries", 0)) + 1
+            if test_result == "confirmed_progress":
+                stats["confirmed"] = int(stats.get("confirmed", 0)) + 1
+            elif test_result == "visible_change_no_progress":
+                stats["visible"] = int(stats.get("visible", 0)) + 1
+            elif test_result == "weak_or_blocked_effect":
+                stats["weak"] = int(stats.get("weak", 0)) + 1
+                if transition.get("changed_cells") == 0:
+                    stats["no_effect"] = int(stats.get("no_effect", 0)) + 1
+            elif test_result == "no_visible_effect":
+                stats["no_effect"] = int(stats.get("no_effect", 0)) + 1
+            elif test_result == "invalid_frame":
+                stats["blocked"] = int(stats.get("blocked", 0)) + 1
+            history[action6_key] = stats
 
         record = {
             "step": len(self.session["logs"]),

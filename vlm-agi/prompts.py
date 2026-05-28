@@ -130,6 +130,7 @@ def build_policy_prompt(
     *,
     action6_candidates: list[dict[str, Any]] | None = None,
     max_actions: int | None = None,
+    image_count: int | None = None,
 ) -> str:
     planned_actions = int(max_actions or config.actions_per_vlm_call)
     current_available = list(meta.get("available_actions", []))
@@ -174,6 +175,24 @@ Infer the player and goal from the current image.
         "levels_completed": meta.get("levels_completed"),
         "available_actions": meta.get("available_actions"),
     }
+    image_count_text = ""
+    if image_count is not None:
+        if image_count >= 2:
+            image_count_text = f"""
+
+Input confirmation:
+- You are receiving exactly {image_count} images now.
+- Image 1 is BEFORE the previous action.
+- Image 2 is AFTER/current.
+- You must compare them before choosing the next action.
+""".rstrip()
+        else:
+            image_count_text = f"""
+
+Input confirmation:
+- You are receiving exactly {image_count} image now.
+- There is no previous image to compare against.
+""".rstrip()
     action6_text = ""
     if action6_candidates:
         action6_text = f"""
@@ -188,6 +207,7 @@ ACTION6 rule:
     return f"""
 Available actions:
 {json.dumps(current_available, ensure_ascii=False)}
+{image_count_text}
 {action6_text}
 
 {previous_context}
