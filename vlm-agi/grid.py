@@ -141,6 +141,75 @@ def summarize_objects(grid: Any, max_objects: int = 10) -> list[dict[str, Any]]:
     return objects[:max_objects]
 
 
+def summarize_spatial_layout(grid: Any, max_objects: int = 12) -> dict[str, Any]:
+    arr = np.asarray(as_list_grid(grid), dtype=int)
+    if arr.ndim != 2 or arr.size == 0:
+        return {
+            "shape": [0, 0],
+            "nonzero_bbox": None,
+            "top_colors": [],
+            "object_count": 0,
+            "large_objects": [],
+            "edge_contacts": {"top": 0, "bottom": 0, "left": 0, "right": 0},
+        }
+
+    h, w = arr.shape
+    nonzero = arr != 0
+    bbox = None
+    if nonzero.any():
+        ys, xs = np.where(nonzero)
+        bbox = {
+            "x_min": int(xs.min()),
+            "x_max": int(xs.max()),
+            "y_min": int(ys.min()),
+            "y_max": int(ys.max()),
+        }
+
+    colors, counts = np.unique(arr[nonzero], return_counts=True) if nonzero.any() else ([], [])
+    top_colors = [
+        {"color_id": int(color), "count": int(count)}
+        for color, count in sorted(zip(colors, counts), key=lambda item: -item[1])[:6]
+    ]
+
+    objects = summarize_objects(grid, max_objects=max_objects)
+    large_objects = []
+    for obj in objects[:6]:
+        bbox_obj = obj["bbox"]
+        touches = []
+        if bbox_obj["y_min"] == 0:
+            touches.append("top")
+        if bbox_obj["y_max"] == h - 1:
+            touches.append("bottom")
+        if bbox_obj["x_min"] == 0:
+            touches.append("left")
+        if bbox_obj["x_max"] == w - 1:
+            touches.append("right")
+        large_objects.append(
+            {
+                "color_id": obj["color_id"],
+                "cell_count": obj["cell_count"],
+                "bbox": bbox_obj,
+                "center": obj["center"],
+                "touches_edge": touches,
+            }
+        )
+
+    edge_contacts = {
+        "top": int(np.count_nonzero(arr[0, :] != 0)),
+        "bottom": int(np.count_nonzero(arr[-1, :] != 0)),
+        "left": int(np.count_nonzero(arr[:, 0] != 0)),
+        "right": int(np.count_nonzero(arr[:, -1] != 0)),
+    }
+    return {
+        "shape": [int(h), int(w)],
+        "nonzero_bbox": bbox,
+        "top_colors": top_colors,
+        "object_count": len(objects),
+        "large_objects": large_objects,
+        "edge_contacts": edge_contacts,
+    }
+
+
 def action6_candidates(
     grid: Any,
     *,

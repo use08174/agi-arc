@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from config import AppConfig
-from grid import frame_metadata, latest_grid_from_raw, summarize_objects
+from grid import frame_metadata, latest_grid_from_raw, summarize_objects, summarize_spatial_layout
 
 
 SCENE_UNDERSTANDING_SYSTEM_PROMPT = """
@@ -158,6 +158,7 @@ def build_policy_prompt(
     image_count: int | None = None,
 ) -> str:
     planned_actions = int(max_actions or config.actions_per_vlm_call)
+    min_actions = min(3, planned_actions)
     current_available = list(meta.get("available_actions", []))
     prev_reasoning = session.get("last_vlm_reasoning")
     prev_visual_change = session.get("last_visual_change")
@@ -229,6 +230,9 @@ Infer the player and goal from the current image.
         "levels_completed": meta.get("levels_completed"),
         "available_actions": meta.get("available_actions"),
     }
+    current_grid = latest_grid_from_raw(session.get("raw_for_prompt")) if session.get("raw_for_prompt") is not None else []
+    detected_objects = summarize_objects(current_grid, max_objects=12) if current_grid else []
+    spatial_layout = summarize_spatial_layout(current_grid) if current_grid else {}
     image_count_text = ""
     if image_count is not None:
         if image_count >= 2:
@@ -269,6 +273,12 @@ Available actions:
 Learned control/response evidence:
 {json.dumps(learned_action_meanings, ensure_ascii=False)}
 
+Detected connected components:
+{json.dumps(detected_objects, ensure_ascii=False)}
+
+Spatial layout summary:
+{json.dumps(spatial_layout, ensure_ascii=False)}
+
 {previous_context}
 
 Image task:
@@ -280,7 +290,7 @@ Image task:
 Rules:
 - Return strict JSON only.
 - chosen_actions must be a list.
-- Output 1 to {planned_actions} actions.
+- Output {min_actions} to {planned_actions} actions.
 - Every non-ACTION6 action must be exactly one of Available actions.
 - If ACTION6 is used, it must include x and y in the exact candidate string format.
 - Do not choose an action before comparing the images when two images are provided.
@@ -292,6 +302,7 @@ Rules:
 - Do not take actions whose only purpose is "see what happens" if you already have a stronger goal-directed plan.
 - Do not write best_experiment like "test whether ACTION3 moves left" or "test whether ACTION4 moves right". Those are already known.
 - Use ACTION1-ACTION4 to pursue spatial goals, not to rediscover the control mapping.
+- Use the connected components and spatial layout summary to infer corridors, blockers, targets, and likely routes.
 
 Current metadata:
 {json.dumps(current_meta, ensure_ascii=False)}
@@ -303,6 +314,7 @@ Current objective:
 - Choose actions that either advance the immediate_goal or distinguish between competing rule hypotheses.
 - Prefer experiments that produce informative differences, not just movement.
 - Convert rule understanding into a concrete short plan instead of re-probing the same mechanic.
+- Always provide at least 3 actions when possible.
 - If the rule already looks stable and a repeated move is the best test, fill chosen_actions with a longer repeated sequence instead of returning only one action.
 - If a repeated move is justified, prefer emitting multiple actions at once up to the allowed budget.
 

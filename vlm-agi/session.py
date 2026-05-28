@@ -75,6 +75,8 @@ def build_default_session_state() -> dict[str, Any]:
 
 
 class VLMArcRunner:
+    MIN_PLANNED_ACTIONS = 3
+
     def __init__(self, config: AppConfig, vlm: VLMManager):
         self.config = config
         self.vlm = vlm
@@ -401,14 +403,21 @@ class VLMArcRunner:
             raise ValueError(f"No chosen_actions found in parsed output: {parsed}")
 
         clean = []
+        errors = []
         for action in actions:
             if len(clean) >= max_actions:
                 break
-            if str(action).startswith("ACTION6|"):
-                action = self.coerce_action6_to_candidate(str(action))
-            clean.append(self.validate_action_text(action, raw_frame))
+            try:
+                if str(action).startswith("ACTION6|"):
+                    action = self.coerce_action6_to_candidate(str(action))
+                clean.append(self.validate_action_text(action, raw_frame))
+            except Exception as exc:
+                errors.append(f"{action}: {exc}")
+                continue
         if not clean:
-            raise ValueError(f"Empty chosen_actions after validation: {parsed}")
+            raise ValueError(
+                f"Empty chosen_actions after validation: errors={errors} parsed={parsed}"
+            )
         return clean
 
     @staticmethod
@@ -553,13 +562,14 @@ class VLMArcRunner:
 
     def adaptive_action_budget(self, raw_frame: Any) -> int:
         if not self.config.adaptive_action_planning:
-            return self.config.actions_per_vlm_call
+            return max(self.MIN_PLANNED_ACTIONS, self.config.actions_per_vlm_call)
 
         max_budget = max(1, self.config.max_actions_per_vlm_call)
-        base_budget = max(1, min(self.config.actions_per_vlm_call, max_budget))
+        min_budget = min(self.MIN_PLANNED_ACTIONS, max_budget)
+        base_budget = max(min_budget, min(self.config.actions_per_vlm_call, max_budget))
         logs = [record for record in self.session.get("logs", [])[-3:] if isinstance(record, dict)]
         if not logs:
-            return 1
+            return min_budget
 
         strengths = []
         recent_action6 = 0
@@ -589,11 +599,11 @@ class VLMArcRunner:
         only_coordinate = bool(available) and set(available) == {"ACTION6"}
 
         if latest_result in {"invalid_frame", "no_visible_effect"}:
-            return 1
+            return min_budget
         if isinstance(latest_changed, int) and latest_changed == 0:
-            return 1
+            return min_budget
         if latest_result == "weak_or_blocked_effect":
-            return 1 if recent_action6 else min(2, base_budget)
+            return min_budget if recent_action6 else max(min_budget, min(3, base_budget))
         if latest_result == "confirmed_progress":
             if repeated_same_action and recent_non_action6:
                 return min(max_budget, 10)
@@ -604,7 +614,50 @@ class VLMArcRunner:
             return min(max_budget, 5)
         if avg_change >= 3:
             return min(max_budget, 3 if recent_action6 or only_coordinate else 5)
-        return 1 if recent_action6 or only_coordinate else base_budget
+        return min_budget if recent_action6 or only_coordinate else base_budget
+
+    def _preferred_padding_actions(self, raw_frame: Any) -> list[str]:
+        available = available_action_names(raw_frame)
+        recent = [
+            str(record.get("action", ""))
+            for record in self.session.get("logs", [])[-6:]
+            if isinstance(record, dict)
+        ]
+        ordered: list[str] = []
+        for action in ["ACTION3", "ACTION4", "ACTION1", "ACTION2", "ACTION7", "ACTION5"]:
+            if action in available and action not in ordered:
+                ordered.append(action)
+        if "ACTION6" in available:
+            candidates = self.session.get("last_action6_candidates", [])
+            if candidates:
+                ordered.append(str(candidates[0]["action_text"]))
+        for action in available:
+            if action not in ordered and action != "ACTION6":
+                ordered.append(action)
+        if not ordered:
+            return []
+        ordered.sort(key=lambda action: (action in recent, recent.count(action)))
+        return ordered
+
+    def ensure_minimum_action_sequence(
+        self,
+        raw_frame: Any,
+        action_texts: list[str],
+        max_actions: int,
+    ) -> list[str]:
+        target = min(max(self.MIN_PLANNED_ACTIONS, 1), max_actions)
+        if len(action_texts) >= target:
+            return action_texts[:max_actions]
+
+        padded = list(action_texts)
+        fillers = self._preferred_padding_actions(raw_frame)
+        if not fillers:
+            return padded
+        idx = 0
+        while len(padded) < target:
+            padded.append(fillers[idx % len(fillers)])
+            idx += 1
+        return padded[:max_actions]
 
     def should_prefer_movement_over_action6(self, raw_frame: Any) -> bool:
         available = set(available_action_names(raw_frame))
@@ -725,7 +778,7 @@ class VLMArcRunner:
             candidates = self.build_action6_candidates(raw_frame)
         prompt = build_policy_prompt(
             meta,
-            self.session,
+            {**self.session, "raw_for_prompt": raw_frame},
             self.config,
             action6_candidates=candidates,
             max_actions=max_actions,
@@ -751,6 +804,7 @@ class VLMArcRunner:
         action_texts = self.get_chosen_actions_from_parsed(parsed, raw_frame, max_actions)
         action_texts = self.demote_early_action6(action_texts, raw_frame)
         action_texts = self.maybe_expand_action_sequence(action_texts, parsed, max_actions)
+        action_texts = self.ensure_minimum_action_sequence(raw_frame, action_texts, max_actions)
         parsed["chosen_actions"] = list(action_texts)
         return action_texts, parsed, raw_text
 
