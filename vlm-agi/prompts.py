@@ -160,6 +160,10 @@ def build_policy_prompt(
     planned_actions = int(max_actions or config.actions_per_vlm_call)
     min_actions = min(3, planned_actions)
     current_available = list(meta.get("available_actions", []))
+    unavailable = [
+        action for action in ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION6", "ACTION7"]
+        if action not in current_available
+    ]
     prev_reasoning = session.get("last_vlm_reasoning")
     prev_visual_change = session.get("last_visual_change")
     prev_player_hypothesis = session.get("last_player_hypothesis")
@@ -264,9 +268,25 @@ ACTION6 rule:
 - Do not invent new x,y coordinates.
 - If movement actions ACTION1-ACTION4 are available and the control rule is still uncertain, prefer testing movement before ACTION6.
 """.rstrip()
+    action_menu = []
+    action_meanings = {
+        "ACTION1": "move up",
+        "ACTION2": "move down",
+        "ACTION3": "move left",
+        "ACTION4": "move right",
+        "ACTION5": "interact/special",
+        "ACTION6": "coordinate action",
+        "ACTION7": "extra action",
+    }
+    for action in current_available:
+        action_menu.append({"action": action, "meaning": action_meanings.get(action, "unknown")})
     return f"""
 Available actions:
 {json.dumps(current_available, ensure_ascii=False)}
+Unavailable actions for this state:
+{json.dumps(unavailable, ensure_ascii=False)}
+Action menu for this exact state:
+{json.dumps(action_menu, ensure_ascii=False)}
 {image_count_text}
 {action6_text}
 
@@ -292,6 +312,8 @@ Rules:
 - chosen_actions must be a list.
 - Output {min_actions} to {planned_actions} actions.
 - Every non-ACTION6 action must be exactly one of Available actions.
+- Available actions are a hard constraint for the current state.
+- If an action is not listed in Available actions, it is currently impossible and must not appear in chosen_actions, plan_summary, or best_experiment.
 - If ACTION6 is used, it must include x and y in the exact candidate string format.
 - Do not choose an action before comparing the images when two images are provided.
 - Do not rely only on object appearance to decide the player.
@@ -303,6 +325,10 @@ Rules:
 - Do not write best_experiment like "test whether ACTION3 moves left" or "test whether ACTION4 moves right". Those are already known.
 - Use ACTION1-ACTION4 to pursue spatial goals, not to rediscover the control mapping.
 - Use the connected components and spatial layout summary to infer corridors, blockers, targets, and likely routes.
+- If upward progress seems desirable but ACTION1 is unavailable, first choose an available repositioning action such as ACTION3, ACTION4, ACTION7, or ACTION6 if those are available.
+- If downward progress seems desirable but ACTION2 is unavailable, first choose an available repositioning action instead of naming ACTION2.
+- Before writing chosen_actions, mentally check each action against the Action menu for this exact state.
+- chosen_actions should be the direct executable translation of your plan, not an abstract wish like "go up" when up is unavailable.
 
 Current metadata:
 {json.dumps(current_meta, ensure_ascii=False)}
