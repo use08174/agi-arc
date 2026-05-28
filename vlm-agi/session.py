@@ -71,6 +71,7 @@ def build_default_session_state() -> dict[str, Any]:
         "last_action6_candidates": [],
         "last_planned_action_budget": None,
         "action6_history": {},
+        "vlm_disabled": False,
     }
 
 
@@ -858,7 +859,7 @@ class VLMArcRunner:
         raw_vlm_output = ""
         queue_before = list(self.session.get("action_queue", []))
 
-        if not self.session.get("action_queue"):
+        if not self.session.get("action_queue") and not self.session.get("vlm_disabled"):
             try:
                 action_texts, plan, raw_vlm_output = self.ask_vlm_for_action_sequence(raw)
                 self.session["action_queue"] = list(action_texts)
@@ -866,6 +867,8 @@ class VLMArcRunner:
                 vlm_called = True
             except Exception as exc:
                 print("VLM action parse/validation failed:", repr(exc))
+                if "VLM unavailable:" in str(exc) or "out of memory" in str(exc).lower():
+                    self.session["vlm_disabled"] = True
                 fallback = self.fallback_action(raw)
                 plan = {
                     "reasoning": f"fallback due to error: {repr(exc)}",
@@ -874,6 +877,14 @@ class VLMArcRunner:
                 self.session["action_queue"] = [fallback]
                 self.session["current_plan"] = plan
                 vlm_called = True
+        elif not self.session.get("action_queue"):
+            fallback = self.fallback_action(raw)
+            plan = {
+                "reasoning": "VLM disabled after unrecoverable load/generation failure; using fallback policy.",
+                "chosen_actions": [fallback],
+            }
+            self.session["action_queue"] = [fallback]
+            self.session["current_plan"] = plan
         else:
             plan = self.session.get("current_plan") or {
                 "reasoning": "continuing queued VLM action sequence",

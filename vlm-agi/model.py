@@ -106,6 +106,7 @@ class VLMManager:
         self.model: Any | None = None
         self.model_path: str | None = None
         self.processor_path: str | None = None
+        self.unavailable_reason: str | None = None
 
     def load(self) -> tuple[Any, Any]:
         from transformers import AutoConfig, AutoProcessor
@@ -174,20 +175,33 @@ class VLMManager:
                     "cpu": "48GiB",
                 }
 
-        model = Qwen3VLForConditionalGeneration.from_pretrained(str(model_path), **kwargs)
-        if torch.cuda.is_available() and "device_map" not in kwargs:
-            model.to("cuda")
+        try:
+            model = Qwen3VLForConditionalGeneration.from_pretrained(str(model_path), **kwargs)
+            if torch.cuda.is_available() and "device_map" not in kwargs:
+                model.to("cuda")
+        except Exception as exc:
+            if self._is_oom_error(exc):
+                self._release_cuda_memory()
+                self.unavailable_reason = (
+                    "VLM unavailable: full Qwen3-VL 8B does not fit on the current GPU "
+                    "without quantization or CPU offload."
+                )
+                raise RuntimeError(self.unavailable_reason) from exc
+            raise
         model.eval()
 
         self.processor = processor
         self.model = model
         self.model_path = str(model_path)
         self.processor_path = str(processor_path)
+        self.unavailable_reason = None
         print("loaded processor:", type(processor).__name__)
         print("loaded model:", type(model).__name__)
         return processor, model
 
     def get(self, *, force_reload: bool | None = None) -> tuple[Any, Any]:
+        if self.unavailable_reason is not None:
+            raise RuntimeError(self.unavailable_reason)
         if force_reload is None:
             force_reload = self.config.force_reload_model
         if not force_reload and self.processor is not None and self.model is not None:
