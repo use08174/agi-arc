@@ -32,6 +32,7 @@ class AppConfig:
     action6_grid_points_per_axis: int
     max_actions_per_vlm_call: int
     adaptive_action_planning: bool
+    gpu_memory_limit_gb: int
     repo_root: Path
     in_kaggle: bool
 
@@ -91,6 +92,7 @@ class AppConfig:
                 os.getenv("ARC_VLM_MAX_ACTIONS_PER_CALL", "10")
             ),
             adaptive_action_planning=os.getenv("ARC_VLM_ADAPTIVE_ACTIONS", "1") == "1",
+            gpu_memory_limit_gb=int(os.getenv("ARC_VLM_GPU_MEMORY_LIMIT_GB", "11")),
             repo_root=repo_root,
             in_kaggle=in_kaggle,
         )

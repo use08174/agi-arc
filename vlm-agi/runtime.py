@@ -128,6 +128,7 @@ def initialize_runtime(
     install_pillow: bool = False,
     install_arc: bool = True,
 ) -> None:
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     if install_pillow:
         install_pillow_from_local_wheel()
     if install_arc:

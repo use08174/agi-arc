@@ -168,6 +168,11 @@ class VLMManager:
         }
         if torch.cuda.is_available():
             kwargs["device_map"] = "auto"
+            kwargs["offload_folder"] = str(Path("/kaggle/working/model-offload"))
+            kwargs["max_memory"] = {
+                0: f"{max(6, int(self.config.gpu_memory_limit_gb))}GiB",
+                "cpu": "48GiB",
+            }
 
         model = Qwen3VLForConditionalGeneration.from_pretrained(str(model_path), **kwargs)
         model.eval()

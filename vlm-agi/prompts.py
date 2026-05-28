@@ -160,61 +160,24 @@ def build_policy_prompt(
     planned_actions = int(max_actions or config.actions_per_vlm_call)
     min_actions = min(3, planned_actions)
     current_available = list(meta.get("available_actions", []))
-    unavailable = [
-        action for action in ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION6", "ACTION7"]
-        if action not in current_available
-    ]
-    prev_reasoning = session.get("last_vlm_reasoning")
     prev_visual_change = session.get("last_visual_change")
     prev_player_hypothesis = session.get("last_player_hypothesis")
     prev_rule_hypotheses = session.get("rule_hypotheses") or []
-    prev_test_goal = session.get("last_test_goal")
-    prev_expected_observation = session.get("last_expected_observation")
     prev_strategic_goal = session.get("last_strategic_goal")
     prev_immediate_goal = session.get("last_immediate_goal")
-    prev_plan_summary = session.get("last_plan_summary")
-    prev_plan_stop_condition = session.get("last_plan_stop_condition")
-    learned_action_meanings = session.get("learned_action_meanings") or {}
     prev_action = session.get("last_action")
     prev_transition = compact_transition_for_prompt(session.get("last_transition"))
 
     if prev_action or prev_transition:
         previous_context = f"""
-Previous action:
-{prev_action or "(none)"}
-
-Previous VLM visual_change:
-{prev_visual_change or "(none)"}
-
-Previous VLM player_hypothesis:
-{prev_player_hypothesis or "(none)"}
-
-Previous rule hypotheses:
-{json.dumps(prev_rule_hypotheses, ensure_ascii=False)}
-
-Previous strategic goal:
-{prev_strategic_goal or "(none)"}
-
-Previous immediate goal:
-{prev_immediate_goal or "(none)"}
-
-Previous plan summary:
-{prev_plan_summary or "(none)"}
-
-Previous plan stop condition:
-{prev_plan_stop_condition or "(none)"}
-
-Previous test goal:
-{prev_test_goal or "(none)"}
-
-Previous expected observation:
-{prev_expected_observation or "(none)"}
-
-Previous reasoning:
-{prev_reasoning or "(none)"}
-
-Numeric outcome of previous action:
-{json.dumps(prev_transition, ensure_ascii=False)}
+Previous step summary:
+- action: {prev_action or "(none)"}
+- visual_change: {prev_visual_change or "(none)"}
+- player_hypothesis: {prev_player_hypothesis or "(none)"}
+- strategic_goal: {prev_strategic_goal or "(none)"}
+- immediate_goal: {prev_immediate_goal or "(none)"}
+- top_rule: {json.dumps(prev_rule_hypotheses[:2], ensure_ascii=False)}
+- outcome: {json.dumps(prev_transition, ensure_ascii=False)}
 
 Important:
 - The numeric outcome is only a hint.
@@ -235,7 +198,7 @@ Infer the player and goal from the current image.
         "available_actions": meta.get("available_actions"),
     }
     current_grid = latest_grid_from_raw(session.get("raw_for_prompt")) if session.get("raw_for_prompt") is not None else []
-    detected_objects = summarize_objects(current_grid, max_objects=12) if current_grid else []
+    detected_objects = summarize_objects(current_grid, max_objects=6) if current_grid else []
     spatial_layout = summarize_spatial_layout(current_grid) if current_grid else {}
     image_count_text = ""
     if image_count is not None:
@@ -283,15 +246,10 @@ ACTION6 rule:
     return f"""
 Available actions:
 {json.dumps(current_available, ensure_ascii=False)}
-Unavailable actions for this state:
-{json.dumps(unavailable, ensure_ascii=False)}
 Action menu for this exact state:
 {json.dumps(action_menu, ensure_ascii=False)}
 {image_count_text}
 {action6_text}
-
-Learned control/response evidence:
-{json.dumps(learned_action_meanings, ensure_ascii=False)}
 
 Detected connected components:
 {json.dumps(detected_objects, ensure_ascii=False)}
@@ -334,11 +292,9 @@ Current metadata:
 {json.dumps(current_meta, ensure_ascii=False)}
 
 Current objective:
-- Maintain a small set of explicit rule hypotheses.
 - Infer an explicit likely win condition and name it as strategic_goal.
 - Choose an immediate_goal that advances the strategic_goal.
 - Choose actions that either advance the immediate_goal or distinguish between competing rule hypotheses.
-- Prefer experiments that produce informative differences, not just movement.
 - Convert rule understanding into a concrete short plan instead of re-probing the same mechanic.
 - Always provide at least 3 actions when possible.
 - If the rule already looks stable and a repeated move is the best test, fill chosen_actions with a longer repeated sequence instead of returning only one action.
