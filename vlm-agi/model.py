@@ -201,8 +201,9 @@ class VLMManager:
             out[key] = value.to(device) if hasattr(value, "to") else value
         return out
 
-    def prepare_inputs(self, images: list[Any], prompt: str) -> dict[str, Any]:
-        processor, _ = self.get()
+    def prepare_inputs(self, images: list[Any], prompt: str, *, processor: Any | None = None) -> dict[str, Any]:
+        if processor is None:
+            processor, _ = self.get()
         full_text = POLICY_SYSTEM_PROMPT + "\n\n" + prompt
         messages = [
             {
@@ -226,7 +227,7 @@ class VLMManager:
         max_new_tokens: int | None = None,
     ) -> str:
         processor, model = self.get()
-        inputs = self.prepare_inputs(images, prompt)
+        inputs = self.prepare_inputs(images, prompt, processor=processor)
         inputs = self.move_inputs_to_device(inputs, self.model_device(model))
         max_tokens = int(max_new_tokens or self.config.max_new_tokens)
         with torch.inference_mode():

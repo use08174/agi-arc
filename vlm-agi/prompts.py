@@ -63,6 +63,8 @@ Hard control semantics:
 - ACTION2 means only down.
 - ACTION3 means only left.
 - ACTION4 means only right.
+- These movement semantics are known in advance and are not hypotheses to test.
+- Never use a turn just to verify whether ACTION1-ACTION4 mean up/down/left/right.
 - Never describe ACTION4 as "right and up", "diagonal", "toward a platform", or any other composite move unless the environment response after pressing it causes that outcome.
 - Separate control input from environment response:
   - control input = the commanded direction above
@@ -75,11 +77,15 @@ Return strict JSON only:
 {
   "visual_change": "what changed from Image 1 to Image 2, or 'only one image' if no previous image",
   "player_hypothesis": "which object is likely controlled and why",
+  "strategic_goal": "what winning probably requires overall",
+  "immediate_goal": "what the next short subgoal should accomplish",
   "rule_hypotheses": [
     {"hypothesis": "...", "confidence": "low/medium/high"}
   ],
   "best_experiment": "what rule this action is testing",
   "expected_observation": "what result would support or weaken the rule hypothesis",
+  "plan_summary": "2-4 step plan toward the immediate goal",
+  "plan_stop_condition": "what observation should make you stop or revise the plan",
   "progress_assessment": "progress / no_progress / uncertain",
   "reasoning": "brief reason for the next action",
   "chosen_actions": ["ACTION1"]
@@ -159,6 +165,11 @@ def build_policy_prompt(
     prev_rule_hypotheses = session.get("rule_hypotheses") or []
     prev_test_goal = session.get("last_test_goal")
     prev_expected_observation = session.get("last_expected_observation")
+    prev_strategic_goal = session.get("last_strategic_goal")
+    prev_immediate_goal = session.get("last_immediate_goal")
+    prev_plan_summary = session.get("last_plan_summary")
+    prev_plan_stop_condition = session.get("last_plan_stop_condition")
+    learned_action_meanings = session.get("learned_action_meanings") or {}
     prev_action = session.get("last_action")
     prev_transition = compact_transition_for_prompt(session.get("last_transition"))
 
@@ -175,6 +186,18 @@ Previous VLM player_hypothesis:
 
 Previous rule hypotheses:
 {json.dumps(prev_rule_hypotheses, ensure_ascii=False)}
+
+Previous strategic goal:
+{prev_strategic_goal or "(none)"}
+
+Previous immediate goal:
+{prev_immediate_goal or "(none)"}
+
+Previous plan summary:
+{prev_plan_summary or "(none)"}
+
+Previous plan stop condition:
+{prev_plan_stop_condition or "(none)"}
 
 Previous test goal:
 {prev_test_goal or "(none)"}
@@ -234,12 +257,17 @@ ACTION6 coordinate candidates:
 ACTION6 rule:
 - If you choose ACTION6, you must output one of the exact candidate strings from action6_candidates.
 - Do not output bare ACTION6.
+- Do not invent new x,y coordinates.
+- If movement actions ACTION1-ACTION4 are available and the control rule is still uncertain, prefer testing movement before ACTION6.
 """.rstrip()
     return f"""
 Available actions:
 {json.dumps(current_available, ensure_ascii=False)}
 {image_count_text}
 {action6_text}
+
+Learned control/response evidence:
+{json.dumps(learned_action_meanings, ensure_ascii=False)}
 
 {previous_context}
 
@@ -259,14 +287,22 @@ Rules:
 - Do not rely only on object appearance to decide the player.
 - Prefer the object/region that changed after the previous action as the player.
 - If the previous action made little/no progress, test a different action or hypothesis.
+- Avoid ACTION6 early unless the screen strongly suggests point-and-click interaction or ACTION1-ACTION4 are unavailable.
+- If movement semantics are already supported by prior evidence, stop re-testing them unless that test serves a concrete subgoal.
+- Do not take actions whose only purpose is "see what happens" if you already have a stronger goal-directed plan.
+- Do not write best_experiment like "test whether ACTION3 moves left" or "test whether ACTION4 moves right". Those are already known.
+- Use ACTION1-ACTION4 to pursue spatial goals, not to rediscover the control mapping.
 
 Current metadata:
 {json.dumps(current_meta, ensure_ascii=False)}
 
 Current objective:
 - Maintain a small set of explicit rule hypotheses.
-- Choose actions that distinguish between competing rule hypotheses.
+- Infer an explicit likely win condition and name it as strategic_goal.
+- Choose an immediate_goal that advances the strategic_goal.
+- Choose actions that either advance the immediate_goal or distinguish between competing rule hypotheses.
 - Prefer experiments that produce informative differences, not just movement.
+- Convert rule understanding into a concrete short plan instead of re-probing the same mechanic.
 - If the rule already looks stable and a repeated move is the best test, fill chosen_actions with a longer repeated sequence instead of returning only one action.
 - If a repeated move is justified, prefer emitting multiple actions at once up to the allowed budget.
 
@@ -274,11 +310,15 @@ Return only:
 {{
   "visual_change": "...",
   "player_hypothesis": "...",
+  "strategic_goal": "...",
+  "immediate_goal": "...",
   "rule_hypotheses": [
     {{"hypothesis": "...", "confidence": "low/medium/high"}}
   ],
   "best_experiment": "...",
   "expected_observation": "...",
+  "plan_summary": "...",
+  "plan_stop_condition": "...",
   "progress_assessment": "progress / no_progress / uncertain",
   "reasoning": "...",
   "chosen_actions": []

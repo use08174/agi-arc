@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from math import inf
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +36,34 @@ def build_default_session_state() -> dict[str, Any]:
         "last_visual_change": None,
         "last_player_hypothesis": None,
         "rule_hypotheses": [],
+        "last_strategic_goal": None,
+        "last_immediate_goal": None,
+        "last_plan_summary": None,
+        "last_plan_stop_condition": None,
         "last_test_goal": None,
         "last_expected_observation": None,
+        "learned_action_meanings": {
+            "ACTION1": {
+                "intended_direction": "up",
+                "observed_effect": "fixed control prior",
+                "evidence_strength": 999,
+            },
+            "ACTION2": {
+                "intended_direction": "down",
+                "observed_effect": "fixed control prior",
+                "evidence_strength": 999,
+            },
+            "ACTION3": {
+                "intended_direction": "left",
+                "observed_effect": "fixed control prior",
+                "evidence_strength": 999,
+            },
+            "ACTION4": {
+                "intended_direction": "right",
+                "observed_effect": "fixed control prior",
+                "evidence_strength": 999,
+            },
+        },
         "logs": [],
         "closed": False,
         "action_queue": [],
@@ -196,6 +223,51 @@ class VLMArcRunner:
                 )
         return action_text
 
+    @staticmethod
+    def parse_action6_coords(action_text: str) -> tuple[int, int] | None:
+        if not str(action_text).startswith("ACTION6|"):
+            return None
+        try:
+            _, payload_text = action_text.split("|", 1)
+            parts: dict[str, int] = {}
+            for item in payload_text.split(","):
+                if "=" not in item:
+                    continue
+                key, value = item.split("=", 1)
+                parts[key.strip()] = int(value)
+            if "x" not in parts or "y" not in parts:
+                return None
+            return parts["x"], parts["y"]
+        except Exception:
+            return None
+
+    def coerce_action6_to_candidate(self, action_text: str) -> str:
+        allowed_candidates = [
+            item["action_text"]
+            for item in self.session.get("last_action6_candidates", [])
+            if isinstance(item, dict) and item.get("action_text")
+        ]
+        if not allowed_candidates or not str(action_text).startswith("ACTION6|"):
+            return action_text
+        if action_text in allowed_candidates:
+            return action_text
+
+        coords = self.parse_action6_coords(action_text)
+        if coords is None:
+            return allowed_candidates[0]
+
+        best = allowed_candidates[0]
+        best_distance = inf
+        for candidate in allowed_candidates:
+            candidate_coords = self.parse_action6_coords(candidate)
+            if candidate_coords is None:
+                continue
+            distance = abs(candidate_coords[0] - coords[0]) + abs(candidate_coords[1] - coords[1])
+            if distance < best_distance:
+                best_distance = distance
+                best = candidate
+        return best
+
     def parse_action(self, action_text: str) -> tuple[Any, dict[str, int] | None]:
         from arcengine import GameAction
 
@@ -240,10 +312,49 @@ class VLMArcRunner:
 
     def update_hypotheses_from_plan(self, plan: dict[str, Any]) -> None:
         self.session["rule_hypotheses"] = self._compact_rule_hypotheses(plan)
+        self.session["last_strategic_goal"] = str(plan.get("strategic_goal", "")).strip()
+        self.session["last_immediate_goal"] = str(plan.get("immediate_goal", "")).strip()
+        self.session["last_plan_summary"] = str(plan.get("plan_summary", "")).strip()
+        self.session["last_plan_stop_condition"] = str(
+            plan.get("plan_stop_condition", "")
+        ).strip()
         self.session["last_test_goal"] = str(plan.get("best_experiment", "")).strip()
         self.session["last_expected_observation"] = str(
             plan.get("expected_observation", "")
         ).strip()
+
+    def update_learned_action_meanings(
+        self,
+        action_text: str,
+        transition: dict[str, Any],
+        test_result: str,
+    ) -> None:
+        if not self._is_simple_move(action_text):
+            return
+
+        meanings = dict(self.session.get("learned_action_meanings", {}))
+        mapping = {
+            "ACTION1": "up",
+            "ACTION2": "down",
+            "ACTION3": "left",
+            "ACTION4": "right",
+        }
+        direction = mapping.get(action_text)
+        if direction:
+            changed = transition.get("changed_cells")
+            meanings[action_text] = {
+                "intended_direction": direction,
+                "observed_effect": (
+                    f"visible response after issuing {action_text}"
+                    if isinstance(changed, int) and changed > 0
+                    else meanings.get(action_text, {}).get("observed_effect", "fixed control prior")
+                ),
+                "evidence_strength": max(
+                    int(meanings.get(action_text, {}).get("evidence_strength", 0)),
+                    999,
+                ),
+            }
+            self.session["learned_action_meanings"] = meanings
 
     def update_hypotheses_from_result(
         self,
@@ -293,6 +404,8 @@ class VLMArcRunner:
         for action in actions:
             if len(clean) >= max_actions:
                 break
+            if str(action).startswith("ACTION6|"):
+                action = self.coerce_action6_to_candidate(str(action))
             clean.append(self.validate_action_text(action, raw_frame))
         if not clean:
             raise ValueError(f"Empty chosen_actions after validation: {parsed}")
@@ -493,6 +606,52 @@ class VLMArcRunner:
             return min(max_budget, 3 if recent_action6 or only_coordinate else 5)
         return 1 if recent_action6 or only_coordinate else base_budget
 
+    def should_prefer_movement_over_action6(self, raw_frame: Any) -> bool:
+        available = set(available_action_names(raw_frame))
+        has_movement = bool({"ACTION1", "ACTION2", "ACTION3", "ACTION4"} & available)
+        if not has_movement or "ACTION6" not in available:
+            return False
+
+        logs = [record for record in self.session.get("logs", [])[-4:] if isinstance(record, dict)]
+        if not logs:
+            return True
+
+        movement_progress = False
+        for record in logs:
+            action_name = str(record.get("action", ""))
+            test_result = str(record.get("test_result", ""))
+            if self._is_simple_move(action_name) and test_result in {
+                "confirmed_progress",
+                "visible_change_no_progress",
+            }:
+                movement_progress = True
+                break
+        return not movement_progress
+
+    def demote_early_action6(
+        self,
+        action_texts: list[str],
+        raw_frame: Any,
+    ) -> list[str]:
+        if not action_texts or not self.should_prefer_movement_over_action6(raw_frame):
+            return action_texts
+        if not str(action_texts[0]).startswith("ACTION6"):
+            return action_texts
+
+        available = available_action_names(raw_frame)
+        recent = [
+            str(record.get("action", ""))
+            for record in self.session.get("logs", [])[-6:]
+            if isinstance(record, dict)
+        ]
+        for candidate in ["ACTION1", "ACTION2", "ACTION3", "ACTION4"]:
+            if candidate in available and candidate not in recent:
+                return [candidate]
+        for candidate in ["ACTION1", "ACTION2", "ACTION3", "ACTION4"]:
+            if candidate in available:
+                return [candidate]
+        return action_texts
+
     @staticmethod
     def plan_intent_for_budget(
         max_actions: int,
@@ -500,17 +659,17 @@ class VLMArcRunner:
     ) -> str:
         if max_actions >= 8:
             return (
-                "You have strong evidence. Prefer a long, consistent action sequence that can repeat a known-good move."
+                "You have strong evidence. Commit to a goal-directed sequence that pursues the current subgoal, not just another probe."
             )
         if max_actions >= 5:
             return (
-                "You have some evidence. Prefer a short multi-step plan if the same hypothesis still looks valid."
+                "You have some evidence. Prefer a short plan with a concrete subgoal and stop condition."
             )
         if "ACTION6" in available_actions:
             return (
                 "Treat ACTION6 as a probe unless visual evidence is strong. Prefer 1 precise coordinate test before committing to a longer plan."
             )
-        return "If uncertain, keep the plan short."
+        return "If uncertain, keep the plan short, but still name a strategic_goal and immediate_goal."
 
     @staticmethod
     def _is_simple_move(action_text: str) -> bool:
@@ -590,6 +749,7 @@ class VLMArcRunner:
         self.update_hypotheses_from_plan(parsed)
         self.session["last_planned_action_budget"] = max_actions
         action_texts = self.get_chosen_actions_from_parsed(parsed, raw_frame, max_actions)
+        action_texts = self.demote_early_action6(action_texts, raw_frame)
         action_texts = self.maybe_expand_action_sequence(action_texts, parsed, max_actions)
         parsed["chosen_actions"] = list(action_texts)
         return action_texts, parsed, raw_text
@@ -701,6 +861,7 @@ class VLMArcRunner:
             history[action6_key] = stats
 
         self.update_hypotheses_from_result(action_text, transition, test_result)
+        self.update_learned_action_meanings(action_text, transition, test_result)
 
         record = {
             "step": len(self.session["logs"]),
@@ -709,6 +870,10 @@ class VLMArcRunner:
             "planned_action_budget": self.session.get("last_planned_action_budget"),
             "plan": plan,
             "rule_hypotheses": list(self.session.get("rule_hypotheses", [])),
+            "strategic_goal": self.session.get("last_strategic_goal"),
+            "immediate_goal": self.session.get("last_immediate_goal"),
+            "plan_summary": self.session.get("last_plan_summary"),
+            "plan_stop_condition": self.session.get("last_plan_stop_condition"),
             "test_goal": self.session.get("last_test_goal"),
             "expected_observation": self.session.get("last_expected_observation"),
             "planned_actions": plan.get("chosen_actions") if isinstance(plan, dict) else None,
@@ -734,7 +899,16 @@ class VLMArcRunner:
 
         reasoning = plan.get("reasoning") if isinstance(plan, dict) else ""
         test_goal = self.session.get("last_test_goal") or ""
+        strategic_goal = self.session.get("last_strategic_goal") or ""
+        immediate_goal = self.session.get("last_immediate_goal") or ""
+        plan_summary = self.session.get("last_plan_summary") or ""
         print(f"[step {record['step']}]")
+        if strategic_goal:
+            print(f"goal: {strategic_goal}")
+        if immediate_goal:
+            print(f"subgoal: {immediate_goal}")
+        if plan_summary:
+            print(f"plan: {plan_summary}")
         if test_goal:
             print(f"test: {test_goal}")
         if reasoning:
